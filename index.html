@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>分帳管家</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <style>
+        .loader { border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease; }
+        .fade-enter-from, .fade-leave-to { opacity: 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800 font-sans">
+    <div id="app" class="max-w-md mx-auto min-h-screen bg-white shadow-lg relative flex flex-col">
+        
+        <!-- Header -->
+        <header class="bg-slate-800 text-white p-4 flex justify-between items-center sticky top-0 z-50">
+            <div class="flex items-center gap-2">
+                <button v-if="currentView !== 'projectList' && !loading" @click="goBack" class="text-white text-xl pr-2">←</button>
+                <div>
+                    <h1 class="text-lg font-bold">{{ headerTitle }}</h1>
+                    <p v-if="currentProject" class="text-xs text-gray-400">{{ currentProject.name }}</p>
+                </div>
+            </div>
+            <div v-if="user" class="flex items-center gap-2">
+                <img :src="user.pictureUrl || 'https://via.placeholder.com/30'" class="w-8 h-8 rounded-full border border-gray-500">
+            </div>
+        </header>
+
+        <!-- Loading Overlay -->
+        <div v-if="loading" class="absolute inset-0 bg-white/90 z-40 flex flex-col items-center justify-center">
+            <div class="loader mb-2"></div>
+            <p class="text-sm text-gray-500">{{ loadingText }}</p>
+        </div>
+
+        <!-- Main Content -->
+        <main class="flex-1 p-4 pb-24 overflow-y-auto">
+            
+            <!-- Error Alert -->
+            <div v-if="error" class="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-4 relative" role="alert">
+                <span class="block sm:inline">{{ error }}</span>
+                <span @click="error = null" class="absolute top-0 bottom-0 right-0 px-4 py-3 cursor-pointer font-bold">×</span>
+            </div>
+
+            <!-- VIEW 1: PROJECT LIST (Entrance) -->
+            <div v-if="currentView === 'projectList'">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-gray-600 font-bold">選擇帳本</h2>
+                    <button @click="currentView = 'createProject'" class="bg-blue-600 text-white px-3 py-1.5 rounded-full text-sm shadow hover:bg-blue-700 transition">
+                        + 新增帳本
+                    </button>
+                </div>
+
+                <div v-if="projects.length === 0" class="text-center py-12 text-gray-400 border-2 border-dashed border-gray-200 rounded-lg">
+                    <p>目前沒有進行中的分帳活動</p>
+                    <p class="text-xs mt-2">點擊右上方按鈕建立第一個活動</p>
+                </div>
+
+                <div class="grid gap-3">
+                    <div v-for="p in projects" :key="p.id" @click="enterProject(p)" 
+                        class="bg-white border rounded-xl p-4 shadow-sm hover:shadow-md transition cursor-pointer active:scale-95 border-l-4 border-l-blue-500">
+                        <div class="flex justify-between items-start">
+                            <h3 class="font-bold text-lg text-gray-800">{{ p.name }}</h3>
+                            <span class="text-xs bg-gray-100 text-gray-500 px-2 py-1 rounded-full">進行中</span>
+                        </div>
+                        <p class="text-xs text-gray-400 mt-2">建立於 {{ formatDate(p.timestamp) }}</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- VIEW 2: CREATE PROJECT -->
+            <div v-if="currentView === 'createProject'">
+                <h2 class="text-xl font-bold mb-6">建立新帳本</h2>
+                <form @submit.prevent="submitCreateProject" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">活動名稱</label>
+                        <input v-model="newProjectName" type="text" required class="w-full rounded-lg border-gray-300 border p-3 focus:ring-2 focus:ring-blue-500 outline-none" placeholder="例如：2026 東京滑雪團">
+                    </div>
+                    <button type="submit" class="w-full bg-blue-600 text-white py-3 rounded-lg font-bold shadow-lg hover:bg-blue-700 transition">
+                        確認建立
+                    </button>
+                    <button type="button" @click="currentView = 'projectList'" class="w-full text-gray-500 py-2">取消</button>
+                </form>
+            </div>
+
+            <!-- VIEW 3: EXPENSE LIST (Inside a Project) -->
+            <div v-if="currentView === 'expenseList'">
+                <div class="flex justify-between items-center mb-4 bg-gray-50 p-3 rounded-lg">
+                    <div class="text-sm text-gray-500">
+                        目前總支出: <span class="text-gray-900 font-bold text-lg">${{ totalExpense }}</span>
+                    </div>
+                    <button @click="currentView = 'addExpense'" class="bg-green-600 text-white px-4 py-2 rounded-lg shadow hover:bg-green-700 text-sm font-bold">
+                        記一筆
+                    </button>
+                </div>
+
+                <div v-if="expenses.length === 0" class="text-center text-gray-400 py-10">
+                    此帳本還沒有任何紀錄
+                </div>
+
+                <div v-for="exp in expenses" :key="exp.id" class="bg-white border border-gray-200 rounded-lg p-3 mb-3 shadow-sm flex justify-between items-center">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-xl overflow-hidden">
+                            <img v-if="users[exp.payerId]?.pictureUrl" :src="users[exp.payerId].pictureUrl" class="w-full h-full object-cover">
+                            <span v-else>👤</span>
+                        </div>
+                        <div>
+                            <div class="font-bold text-gray-800 text-base">{{ exp.item }}</div>
+                            <div class="text-xs text-gray-500">
+                                {{ getUserName(exp.payerId) }} 付款 • {{ formatDate(exp.timestamp) }}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="font-mono text-lg font-bold text-green-700">
+                        ${{ exp.amount }}
+                    </div>
+                </div>
+            </div>
+
+            <!-- VIEW 4: ADD EXPENSE -->
+            <div v-if="currentView === 'addExpense'">
+                <h2 class="text-xl font-bold mb-4">新增支出</h2>
+                <form @submit.prevent="submitExpense" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">項目</label>
+                        <input v-model="form.item" type="text" required class="w-full rounded-md border border-gray-300 p-2" placeholder="例：晚餐">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">金額</label>
+                        <input v-model.number="form.amount" type="number" required class="w-full rounded-md border border-gray-300 p-2" placeholder="0">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">誰先付？</label>
+                        <select v-model="form.payerId" class="w-full rounded-md border border-gray-300 p-2 bg-white">
+                            <option v-for="(u, id) in users" :value="id">{{ u.displayName }}</option>
+                        </select>
+                    </div>
+                    <div>
+                        <div class="flex justify-between items-center mb-2">
+                            <label class="block text-sm font-medium text-gray-700">分擔成員</label>
+                            <button type="button" @click="selectAllMembers" class="text-xs text-blue-500">全選</button>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto">
+                            <div v-for="(u, id) in users" :key="id" 
+                                @click="toggleSplitMember(id)"
+                                :class="{'bg-green-50 border-green-500 ring-1 ring-green-500': form.splitMembers.includes(id), 'bg-white border-gray-200': !form.splitMembers.includes(id)}"
+                                class="p-2 border rounded cursor-pointer text-sm flex items-center gap-2 transition-all">
+                                <img :src="u.pictureUrl || 'https://via.placeholder.com/20'" class="w-6 h-6 rounded-full">
+                                <span class="truncate">{{ u.displayName }}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="pt-4 grid grid-cols-2 gap-3">
+                        <button type="button" @click="currentView = 'expenseList'" class="bg-gray-200 text-gray-700 py-3 rounded-lg font-bold">取消</button>
+                        <button type="submit" class="bg-green-600 text-white py-3 rounded-lg font-bold shadow">儲存</button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- VIEW 5: SETTLE -->
+            <div v-if="currentView === 'settle'">
+                <h2 class="text-xl font-bold mb-4">結帳建議</h2>
+                <div class="bg-blue-50 text-blue-700 p-3 rounded text-sm mb-4">
+                    針對「{{ currentProject.name }}」的最小轉帳路徑建議。
+                </div>
+
+                <div v-if="settlement.length === 0" class="text-center py-8 text-gray-500">
+                    帳目已平，無需轉帳。
+                </div>
+
+                <div v-for="(tx, idx) in settlement" :key="idx" class="bg-white border rounded-lg p-4 mb-3 shadow-sm flex items-center justify-between">
+                    <div class="flex items-center gap-2 text-sm">
+                        <div class="flex flex-col items-center">
+                            <span class="font-bold text-gray-800">{{ getUserName(tx.from) }}</span>
+                        </div>
+                        <div class="text-gray-400">➔</div>
+                        <div class="flex flex-col items-center">
+                            <span class="font-bold text-gray-800">{{ getUserName(tx.to) }}</span>
+                        </div>
+                    </div>
+                    <div class="font-mono text-xl font-bold text-blue-600">
+                        ${{ tx.amount }}
+                    </div>
+                </div>
+            </div>
+
+        </main>
+
+        <!-- Bottom Nav (Only visible inside a project) -->
+        <nav v-if="['expenseList', 'settle'].includes(currentView)" class="bg-white border-t flex justify-around p-2 z-30">
+            <button @click="currentView = 'expenseList'" :class="{'text-green-600': currentView === 'expenseList'}" class="flex flex-col items-center p-2 text-gray-400">
+                <span class="text-xl">📝</span>
+                <span class="text-xs">明細</span>
+            </button>
+            <button @click="fetchSettlement" :class="{'text-blue-600': currentView === 'settle'}" class="flex flex-col items-center p-2 text-gray-400">
+                <span class="text-xl">⚖️</span>
+                <span class="text-xs">結算</span>
+            </button>
+        </nav>
+    </div>
+
+<script>
+const { createApp, ref, computed, onMounted } = Vue;
+
+// --- CONFIGURATION ---
+const LIFF_ID = "YOUR_LIFF_ID"; 
+const GAS_API_URL = "YOUR_GAS_WEB_APP_URL"; 
+
+createApp({
+    setup() {
+        const loading = ref(true);
+        const loadingText = ref('初始化中...');
+        const error = ref(null);
+        
+        // Views: projectList, createProject, expenseList, addExpense, settle
+        const currentView = ref('projectList'); 
+        
+        const user = ref(null); // Current User Profile
+        const context = ref(null); // LIFF Context (groupId)
+        
+        // Data
+        const projects = ref([]);
+        const currentProject = ref(null);
+        const expenses = ref([]);
+        const users = ref({}); // Map: userId -> {displayName, pictureUrl}
+        const settlement = ref([]);
+
+        // Forms
+        const newProjectName = ref('');
+        const form = ref({
+            item: '',
+            amount: '',
+            payerId: '',
+            splitMembers: []
+        });
+
+        // Computed
+        const headerTitle = computed(() => {
+            if (currentView.value === 'projectList') return '分帳管家';
+            if (currentView.value === 'createProject') return '建立帳本';
+            return '帳本詳情';
+        });
+
+        const totalExpense = computed(() => {
+            return expenses.value.reduce((sum, item) => sum + Number(item.amount), 0);
+        });
+
+        // --- API & UTILS ---
+        const formatDate = (ts) => {
+            if (!ts) return '';
+            const d = new Date(ts);
+            return `${d.getMonth()+1}/${d.getDate()}`;
+        };
+
+        const getUserName = (id) => users.value[id]?.displayName || '未知';
+
+        const callApi = async (action, payload) => {
+            try {
+                const response = await fetch(GAS_API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                    body: JSON.stringify({ action, payload })
+                });
+                const data = await response.json();
+                if (data.status === 'error') throw new Error(data.message);
+                return data;
+            } catch (err) {
+                console.error(err);
+                error.value = err.message;
+                throw err;
+            }
+        };
+
+        // --- FLOWS ---
+
+        const initLiff = async () => {
+            try {
+                await liff.init({ liffId: LIFF_ID });
+                if (!liff.isLoggedIn()) {
+                    liff.login();
+                    return;
+                }
+                user.value = await liff.getProfile();
+                context.value = liff.getContext();
+
+                const groupId = context.value?.groupId || context.value?.roomId;
+                if (!groupId) {
+                    error.value = "請在 LINE 群組中開啟此頁面。";
+                    loading.value = false;
+                    return;
+                }
+
+                // 1. Sync User info to backend
+                callApi('syncUser', {
+                    userId: user.value.userId,
+                    displayName: user.value.displayName,
+                    pictureUrl: user.value.pictureUrl,
+                    groupId: groupId
+                });
+
+                // 2. Fetch Project List
+                await fetchProjects(groupId);
+
+            } catch (err) {
+                error.value = "初始化失敗: " + err.message;
+            } finally {
+                loading.value = false;
+            }
+        };
+
+        const fetchProjects = async (groupId) => {
+            loading.value = true;
+            loadingText.value = "讀取帳本列表...";
+            try {
+                const res = await callApi('getProjects', { groupId });
+                projects.value = res.projects;
+                currentView.value = 'projectList';
+            } finally {
+                loading.value = false;
+            }
+        };
+
+        const submitCreateProject = async () => {
+            if (!newProjectName.value) return;
+            loading.value = true;
+            try {
+                const groupId = context.value.groupId || context.value.roomId;
+                await callApi('createProject', {
+                    name: newProjectName.value,
+                    ownerId: user.value.userId,
+                    boundGroupId: groupId
+                });
+                newProjectName.value = '';
+                await fetchProjects(groupId); // Refresh list
+            } finally {
+                loading.value = false;
+            }
+        };
+
+        const enterProject = async (project) => {
+            currentProject.value = project;
+            loading.value = true;
+            loadingText.value = "載入帳目細節...";
+            try {
+                const res = await callApi('getProjectDetails', { projectId: project.id });
+                expenses.value = res.expenses;
+                users.value = res.users; // Ensure we have user map
+                
+                // Initialize form defaults
+                form.value.payerId = user.value.userId;
+                // Default split members: everyone found in the user map? 
+                // Better strategy: everyone in user map is a candidate.
+                form.value.splitMembers = Object.keys(users.value);
+
+                currentView.value = 'expenseList';
+            } finally {
+                loading.value = false;
+            }
+        };
+
+        const goBack = () => {
+            if (['addExpense', 'settle'].includes(currentView.value)) {
+                currentView.value = 'expenseList';
+            } else if (currentView.value === 'expenseList' || currentView.value === 'createProject') {
+                currentView.value = 'projectList';
+                currentProject.value = null;
+            }
+        };
+
+        // --- EXPENSE LOGIC ---
+
+        const toggleSplitMember = (uid) => {
+            const idx = form.value.splitMembers.indexOf(uid);
+            if (idx > -1) form.value.splitMembers.splice(idx, 1);
+            else form.value.splitMembers.push(uid);
+        };
+
+        const selectAllMembers = () => {
+            form.value.splitMembers = Object.keys(users.value);
+        }
+
+        const submitExpense = async () => {
+            if (form.value.splitMembers.length === 0) {
+                alert("至少需要一位分擔者");
+                return;
+            }
+            loading.value = true;
+            try {
+                await callApi('addExpense', {
+                    projectId: currentProject.value.id,
+                    payerId: form.value.payerId,
+                    amount: form.value.amount,
+                    item: form.value.item,
+                    splitMembers: form.value.splitMembers
+                });
+                
+                // Refresh expenses
+                const res = await callApi('getProjectDetails', { projectId: currentProject.value.id });
+                expenses.value = res.expenses;
+                
+                form.value.item = '';
+                form.value.amount = '';
+                currentView.value = 'expenseList';
+            } finally {
+                loading.value = false;
+            }
+        };
+
+        const fetchSettlement = async () => {
+            loading.value = true;
+            try {
+                const res = await callApi('settle', { projectId: currentProject.value.id });
+                settlement.value = res.transactions;
+                currentView.value = 'settle';
+            } finally {
+                loading.value = false;
+            }
+        };
+
+        onMounted(() => {
+            initLiff();
+        });
+
+        return {
+            loading, loadingText, error, currentView, user, 
+            projects, currentProject, expenses, users, settlement,
+            newProjectName, form, headerTitle, totalExpense,
+            formatDate, getUserName, goBack, submitCreateProject, 
+            enterProject, toggleSplitMember, selectAllMembers, submitExpense, fetchSettlement
+        };
+    }
+}).mount('#app');
+</script>
+</body>
+</html>
