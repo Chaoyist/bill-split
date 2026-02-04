@@ -146,7 +146,7 @@
                             </div>
                         </div>
                     </div>
-                    <!-- 權限控制：只有自己的紀錄 & 未結案時可編輯 -->
+                    <!-- 權限控制：只有自己的紀錄 & 未結案時可編輯 (依賴 creatorId) -->
                     <div v-if="canEdit(exp) && currentProject.status !== 'settled'" class="flex flex-col gap-2 ml-2 pl-2 border-l border-gray-100 justify-center">
                         <button @click="editExpense(exp)" class="text-gray-400 hover:text-blue-500 p-1">✏️</button>
                         <button @click="confirmDelete(exp)" class="text-gray-400 hover:text-red-500 p-1">🗑️</button>
@@ -258,6 +258,7 @@
 const { createApp, ref, computed, onMounted } = Vue;
 
 const LIFF_ID = "2009031450-O3r9jaRJ"; 
+// ⚠️ 已經鎖定，絕不更改
 const GAS_API_URL = "https://script.google.com/macros/s/AKfycbwJD0Qzvb4cw7Hss2U6J-ATTHnQU0Pml6-gyQUE4osX_lXEiFG18HuQ_bR_o3didgxR1Q/exec"; 
 
 createApp({
@@ -317,6 +318,7 @@ createApp({
 
         const callApi = async (action, payload) => {
             try {
+                // 簡化 Fetch (兼容手機版)
                 const response = await fetch(GAS_API_URL, {
                     method: 'POST',
                     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
@@ -434,7 +436,7 @@ createApp({
                     amount: form.value.amount,
                     item: form.value.item,
                     splitMembers: form.value.splitMembers,
-                    creatorId: user.value.userId // Send creator ID
+                    creatorId: user.value.userId // 傳遞建立者 ID
                 });
                 await enterProject(currentProject.value);
             } finally { loading.value = false; }
@@ -463,9 +465,7 @@ createApp({
             loading.value = true;
             try {
                 await callApi('closeProject', { projectId: currentProject.value.id });
-                // Refresh project info locally or reload list
                 await fetchProjects(currentGroupId.value);
-                // Go back to list to see updated status
                 currentView.value = 'projectList';
             } finally { loading.value = false; }
         };
@@ -486,10 +486,9 @@ createApp({
             else { currentView.value = 'projectList'; currentProject.value = null; }
         };
 
-        // 權限檢查：是否可編輯
+        // 權限檢查：只有建立者(優先)或付款人(舊資料)可以修改
         const canEdit = (exp) => {
             if (!user.value) return false;
-            // 優先檢查 creatorId (v4.0+), 否則檢查 payerId (Legacy)
             if (exp.creatorId) return exp.creatorId === user.value.userId;
             return exp.payerId === user.value.userId;
         };
