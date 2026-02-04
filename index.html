@@ -29,7 +29,7 @@
             </div>
         </header>
 
-        <!-- DEBUG PANEL -->
+        <!-- DIAGNOSTIC PANEL (DEBUG) -->
         <div class="bg-black text-green-400 p-2 text-[10px] font-mono break-all overflow-hidden" v-if="debugInfo">
             <p><strong>SRC:</strong> {{ debugInfo.source }}</p>
             <p><strong>GID:</strong> {{ debugInfo.groupId }}</p>
@@ -46,9 +46,18 @@
         <!-- Main Content -->
         <main class="flex-1 p-4 pb-24 overflow-y-auto">
             
+            <!-- Error Alert -->
             <div v-if="error" class="bg-red-50 border-l-4 border-red-500 text-red-700 p-4 mb-4 relative rounded-r shadow-sm">
                 <strong class="font-bold block mb-1">⚠️ 發生錯誤</strong>
                 <span class="block text-sm break-all font-mono bg-red-100 p-1 rounded mb-2">{{ error }}</span>
+                <div v-if="isNetworkError" class="text-xs text-red-800 bg-red-100 p-2 rounded border border-red-200">
+                    <p class="font-bold mb-1">💡 顧問診斷：連線被拒絕</p>
+                    <p>這通常是網路或權限問題，請嘗試：</p>
+                    <ol class="list-decimal ml-4 mt-1 space-y-1">
+                        <li>確認 GAS 部署權限為 <strong>「所有人」</strong>。</li>
+                        <li>完全關閉 LINE App 再重新開啟。</li>
+                    </ol>
+                </div>
                 <button @click="error = null" class="absolute top-2 right-2 text-red-400 hover:text-red-600 font-bold">×</button>
             </div>
 
@@ -286,13 +295,11 @@ createApp({
             return memberIds.value.includes(user.value.userId);
         });
 
-        // 權限檢查：是否可編輯
-        const canEdit = (exp) => {
-            if (!user.value) return false;
-            // 優先檢查 creatorId (v4.0+), 否則檢查 payerId (Legacy)
-            if (exp.creatorId) return exp.creatorId === user.value.userId;
-            return exp.payerId === user.value.userId;
-        };
+        const isNetworkError = computed(() => {
+            if (!error.value) return false;
+            const msg = error.value.toLowerCase();
+            return msg.includes('load failed') || msg.includes('failed to fetch') || msg.includes('network error');
+        });
 
         const formatDate = (ts) => {
             if (!ts) return '';
@@ -479,6 +486,14 @@ createApp({
             else { currentView.value = 'projectList'; currentProject.value = null; }
         };
 
+        // 權限檢查：是否可編輯
+        const canEdit = (exp) => {
+            if (!user.value) return false;
+            // 優先檢查 creatorId (v4.0+), 否則檢查 payerId (Legacy)
+            if (exp.creatorId) return exp.creatorId === user.value.userId;
+            return exp.payerId === user.value.userId;
+        };
+
         const toggleSplitMember = (uid) => {
             const idx = form.value.splitMembers.indexOf(uid);
             if (idx > -1) form.value.splitMembers.splice(idx, 1);
@@ -489,7 +504,7 @@ createApp({
         onMounted(() => { initLiff(); });
 
         return {
-            loading, loadingText, error, debugInfo, currentView, user, currentGroupId,
+            loading, loadingText, error, isNetworkError, debugInfo, currentView, user, currentGroupId,
             projects, currentProject, expenses, users, settlement, isMember,
             newProjectName, form, formMode, headerTitle, totalExpense,
             formatDate, getUserName, getSplitNames, canEdit, goBack, 
