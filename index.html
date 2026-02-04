@@ -29,7 +29,7 @@
             </div>
         </header>
 
-        <!-- DIAGNOSTIC PANEL (DEBUG) -->
+        <!-- DEBUG PANEL -->
         <div class="bg-black text-green-400 p-2 text-[10px] font-mono break-all overflow-hidden" v-if="debugInfo">
             <p><strong>SRC:</strong> {{ debugInfo.source }}</p>
             <p><strong>GID:</strong> {{ debugInfo.groupId }}</p>
@@ -46,18 +46,9 @@
         <!-- Main Content -->
         <main class="flex-1 p-4 pb-24 overflow-y-auto">
             
-            <!-- Error Alert -->
             <div v-if="error" class="bg-red-50 border-l-4 border-red-500 text-red-700 p-4 mb-4 relative rounded-r shadow-sm">
                 <strong class="font-bold block mb-1">⚠️ 發生錯誤</strong>
                 <span class="block text-sm break-all font-mono bg-red-100 p-1 rounded mb-2">{{ error }}</span>
-                <div v-if="isNetworkError" class="text-xs text-red-800 bg-red-100 p-2 rounded border border-red-200">
-                    <p class="font-bold mb-1">💡 顧問診斷：連線被拒絕</p>
-                    <p>這通常是網路或權限問題，請嘗試：</p>
-                    <ol class="list-decimal ml-4 mt-1 space-y-1">
-                        <li>確認 GAS 部署權限為 <strong>「所有人」</strong>。</li>
-                        <li>完全關閉 LINE App 再重新開啟。</li>
-                    </ol>
-                </div>
                 <button @click="error = null" class="absolute top-2 right-2 text-red-400 hover:text-red-600 font-bold">×</button>
             </div>
 
@@ -75,13 +66,15 @@
                 </div>
                 <div class="grid gap-3">
                     <div v-for="p in projects" :key="p.id" @click="enterProject(p)" 
-                        class="bg-white border border-gray-100 rounded-xl p-4 shadow-sm hover:shadow-md transition cursor-pointer active:scale-[0.98] border-l-4 border-l-blue-500 relative overflow-hidden">
+                        :class="{'opacity-75 bg-gray-50 border-gray-300 border-l-gray-400': p.status === 'settled', 'bg-white border-l-blue-500': p.status !== 'settled'}"
+                        class="border border-gray-100 rounded-xl p-4 shadow-sm hover:shadow-md transition cursor-pointer active:scale-[0.98] border-l-4 relative overflow-hidden">
                         <div class="flex justify-between items-start z-10 relative">
                             <div>
                                 <h3 class="font-bold text-lg text-gray-800">{{ p.name }}</h3>
                                 <p class="text-xs text-gray-400 mt-1">{{ formatDate(p.timestamp) }} 建立</p>
                             </div>
-                            <span class="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded-full font-medium">進行中</span>
+                            <span v-if="p.status === 'settled'" class="text-xs bg-gray-200 text-gray-600 px-2 py-1 rounded-full font-medium">已結案</span>
+                            <span v-else class="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded-full font-medium">進行中</span>
                         </div>
                     </div>
                 </div>
@@ -114,9 +107,11 @@
                         <span>總支出</span>
                         <span class="text-gray-900 font-bold text-lg">${{ totalExpense }}</span>
                     </div>
-                    <button v-if="isMember" @click="openAddExpense" class="bg-green-600 text-white px-4 py-2 rounded-lg shadow hover:bg-green-700 text-sm font-bold flex items-center gap-1">
+                    <!-- 只有未結案才能記帳 -->
+                    <button v-if="isMember && currentProject.status !== 'settled'" @click="openAddExpense" class="bg-green-600 text-white px-4 py-2 rounded-lg shadow hover:bg-green-700 text-sm font-bold flex items-center gap-1">
                         ✏️ 記一筆
                     </button>
+                    <span v-else-if="currentProject.status === 'settled'" class="text-xs bg-gray-200 text-gray-500 px-3 py-1 rounded-full font-bold">已鎖定</span>
                 </div>
 
                 <div v-if="expenses.length === 0" class="text-center text-gray-400 py-12">
@@ -142,7 +137,8 @@
                             </div>
                         </div>
                     </div>
-                    <div class="flex flex-col gap-2 ml-2 pl-2 border-l border-gray-100 justify-center">
+                    <!-- 權限控制：只有自己的紀錄 & 未結案時可編輯 -->
+                    <div v-if="canEdit(exp) && currentProject.status !== 'settled'" class="flex flex-col gap-2 ml-2 pl-2 border-l border-gray-100 justify-center">
                         <button @click="editExpense(exp)" class="text-gray-400 hover:text-blue-500 p-1">✏️</button>
                         <button @click="confirmDelete(exp)" class="text-gray-400 hover:text-red-500 p-1">🗑️</button>
                     </div>
@@ -192,14 +188,21 @@
             <!-- VIEW 5: SETTLE -->
             <div v-if="currentView === 'settle'">
                 <h2 class="text-xl font-bold mb-4 text-gray-800">結算方案</h2>
-                <div class="bg-blue-50 text-blue-800 p-4 rounded-xl text-sm mb-4 border border-blue-100 shadow-sm">
+                
+                <div v-if="currentProject.status !== 'settled'" class="bg-blue-50 text-blue-800 p-4 rounded-xl text-sm mb-4 border border-blue-100 shadow-sm">
                     <p class="font-bold mb-1">💡 最佳還款路徑</p>
-                    <p class="text-blue-600 text-xs">系統已自動計算最小轉帳次數，請依下列指示還款。</p>
+                    <p class="text-blue-600 text-xs">系統已自動計算最小轉帳次數。</p>
                 </div>
+                <div v-else class="bg-gray-100 text-gray-600 p-4 rounded-xl text-sm mb-4 border border-gray-200 shadow-sm flex items-center gap-2">
+                    <span>🔒</span>
+                    <span class="font-bold">此專案已結案</span>
+                </div>
+
                 <div v-if="settlement.length === 0" class="text-center py-12 text-gray-400 bg-white rounded-xl border border-dashed">
                     <p class="text-2xl mb-2">🎉</p>
                     <p>帳目已結清，無需轉帳！</p>
                 </div>
+
                 <div v-for="(tx, idx) in settlement" :key="idx" class="bg-white border border-gray-100 rounded-xl p-4 mb-3 shadow-sm flex items-center justify-between">
                     <div class="flex items-center gap-3 text-sm flex-1">
                         <div class="flex flex-col items-center min-w-[3rem]">
@@ -213,6 +216,17 @@
                         </div>
                     </div>
                     <div class="font-mono text-xl font-bold text-blue-600">${{ tx.amount }}</div>
+                </div>
+
+                <!-- ACTIONS -->
+                <div class="mt-6 space-y-3">
+                    <button @click="sendSettlement" class="w-full bg-green-500 text-white py-3 rounded-lg font-bold shadow hover:bg-green-600 flex justify-center items-center gap-2">
+                        <span>📢</span> 傳送結算到群組
+                    </button>
+                    
+                    <button v-if="currentProject.status !== 'settled'" @click="confirmCloseProject" class="w-full bg-white border border-gray-300 text-gray-500 py-3 rounded-lg font-bold hover:bg-gray-50 flex justify-center items-center gap-2">
+                        <span>🔒</span> 結案 (鎖定帳本)
+                    </button>
                 </div>
             </div>
 
@@ -235,7 +249,6 @@
 const { createApp, ref, computed, onMounted } = Vue;
 
 const LIFF_ID = "2009031450-O3r9jaRJ"; 
-// ⚠️ 請確認此 URL 與 GAS 部署一致
 const GAS_API_URL = "https://script.google.com/macros/s/AKfycbwJD0Qzvb4cw7Hss2U6J-ATTHnQU0Pml6-gyQUE4osX_lXEiFG18HuQ_bR_o3didgxR1Q/exec"; 
 
 createApp({
@@ -273,11 +286,13 @@ createApp({
             return memberIds.value.includes(user.value.userId);
         });
 
-        const isNetworkError = computed(() => {
-            if (!error.value) return false;
-            const msg = error.value.toLowerCase();
-            return msg.includes('load failed') || msg.includes('failed to fetch') || msg.includes('network error');
-        });
+        // 權限檢查：是否可編輯
+        const canEdit = (exp) => {
+            if (!user.value) return false;
+            // 優先檢查 creatorId (v4.0+), 否則檢查 payerId (Legacy)
+            if (exp.creatorId) return exp.creatorId === user.value.userId;
+            return exp.payerId === user.value.userId;
+        };
 
         const formatDate = (ts) => {
             if (!ts) return '';
@@ -295,11 +310,8 @@ createApp({
 
         const callApi = async (action, payload) => {
             try {
-                // 🚀 關鍵修正：移除複雜參數，回歸最單純的 Fetch
                 const response = await fetch(GAS_API_URL, {
                     method: 'POST',
-                    // mode: 'cors', // 移除：讓瀏覽器自動處理
-                    // redirect: 'follow', // 移除：避免手機版 WebView 誤判
                     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                     body: JSON.stringify({ action, payload })
                 });
@@ -414,7 +426,8 @@ createApp({
                     payerId: form.value.payerId,
                     amount: form.value.amount,
                     item: form.value.item,
-                    splitMembers: form.value.splitMembers
+                    splitMembers: form.value.splitMembers,
+                    creatorId: user.value.userId // Send creator ID
                 });
                 await enterProject(currentProject.value);
             } finally { loading.value = false; }
@@ -438,6 +451,29 @@ createApp({
             } finally { loading.value = false; }
         };
 
+        const confirmCloseProject = async () => {
+            if(!confirm("確定要結案嗎？結案後將無法新增或修改支出。")) return;
+            loading.value = true;
+            try {
+                await callApi('closeProject', { projectId: currentProject.value.id });
+                // Refresh project info locally or reload list
+                await fetchProjects(currentGroupId.value);
+                // Go back to list to see updated status
+                currentView.value = 'projectList';
+            } finally { loading.value = false; }
+        };
+
+        const sendSettlement = async () => {
+            loading.value = true;
+            try {
+                await callApi('sendSettlementToGroup', { 
+                    projectId: currentProject.value.id,
+                    projectName: currentProject.value.name 
+                });
+                alert("已發送到群組！");
+            } finally { loading.value = false; }
+        };
+
         const goBack = () => {
             if (['addExpense', 'settle'].includes(currentView.value)) currentView.value = 'expenseList';
             else { currentView.value = 'projectList'; currentProject.value = null; }
@@ -453,13 +489,14 @@ createApp({
         onMounted(() => { initLiff(); });
 
         return {
-            loading, loadingText, error, isNetworkError, debugInfo, currentView, user, currentGroupId,
+            loading, loadingText, error, debugInfo, currentView, user, currentGroupId,
             projects, currentProject, expenses, users, settlement, isMember,
             newProjectName, form, formMode, headerTitle, totalExpense,
-            formatDate, getUserName, getSplitNames, goBack, 
+            formatDate, getUserName, getSplitNames, canEdit, goBack, 
             openCreateProject, submitCreateProject, enterProject, joinProject, 
             openAddExpense, editExpense, confirmDelete, submitExpense,
-            toggleSplitMember, selectAllMembers, fetchSettlement
+            toggleSplitMember, selectAllMembers, fetchSettlement,
+            confirmCloseProject, sendSettlement
         };
     }
 }).mount('#app');
