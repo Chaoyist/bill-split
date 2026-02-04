@@ -30,11 +30,11 @@
         </header>
 
         <!-- DIAGNOSTIC PANEL (DEBUG) -->
-        <!-- 黑色面板保留，方便你確認 ID 是否每次都在變 -->
         <div class="bg-black text-green-400 p-2 text-[10px] font-mono break-all overflow-hidden" v-if="debugInfo">
-            <p><strong>TYPE:</strong> {{ debugInfo.type }}</p>
-            <p><strong>GID:</strong> {{ debugInfo.groupId || 'null' }}</p>
-            <p class="text-gray-500">若 GID 每次重整都變，資料將無法保存。</p>
+            <p><strong>SRC:</strong> {{ debugInfo.source }}</p>
+            <p><strong>GID:</strong> {{ debugInfo.groupId }}</p>
+            <p v-if="debugInfo.source === 'URL_PARAM'" class="text-yellow-300">✅ 已鎖定真實群組 ID</p>
+            <p v-else-if="debugInfo.isUuid" class="text-red-400">⚠️ UUID 模式 (資料無法保存)</p>
         </div>
 
         <!-- Loading -->
@@ -236,8 +236,6 @@
 <script>
 const { createApp, ref, computed, onMounted } = Vue;
 
-// ⚠️ Configuration ⚠️
-// 請確認這兩個變數與後端一致
 const LIFF_ID = "2009031450-O3r9jaRJ"; 
 const GAS_API_URL = "https://script.google.com/macros/s/AKfycby-ErOoXEiRdFjgygzhCRZnYg7q1yZYWW_VSHOlaWZf__EqT0NVIXBMZMQJR5E1b0kH/exec"; 
 
@@ -252,7 +250,7 @@ createApp({
         const user = ref(null);
         const context = ref(null);
         const currentGroupId = ref('');
-        const debugInfo = ref(null); // 用於診斷
+        const debugInfo = ref(null); 
 
         // Data
         const projects = ref([]);
@@ -316,37 +314,48 @@ createApp({
                 user.value = await liff.getProfile();
                 context.value = liff.getContext();
                 
+                // --- 🚀 關鍵修改：優先使用 URL 參數 ---
+                const urlParams = new URLSearchParams(window.location.search);
+                const urlGroupId = urlParams.get('groupId');
+                
                 const ctx = context.value || {};
-                const gid = ctx.groupId || ctx.roomId;
-                currentGroupId.value = gid || 'NO_GROUP_ID';
+                const liffGroupId = ctx.groupId || ctx.roomId;
+                
+                // 決定使用哪個 ID
+                let finalGid = '';
+                let idSource = '';
+
+                if (urlGroupId) {
+                    finalGid = urlGroupId;
+                    idSource = 'URL_PARAM';
+                } else {
+                    finalGid = liffGroupId;
+                    idSource = 'LIFF_CONTEXT';
+                }
+                
+                currentGroupId.value = finalGid;
 
                 // --- 診斷邏輯 ---
                 debugInfo.value = {
-                    type: ctx.type,
-                    groupId: ctx.groupId,
-                    roomId: ctx.roomId,
-                    userId: ctx.userId,
-                    isUuid: /^[0-9a-f]{8}-[0-9a-f]{4}/.test(gid || '') // 偵測是否為 UUID
+                    source: idSource,
+                    groupId: finalGid,
+                    isUuid: /^[0-9a-f]{8}-[0-9a-f]{4}/.test(finalGid || '')
                 };
                 
-                if (!gid) {
-                    error.value = "警告：無法取得群組 ID。請確認你是從群組對話開啟，而非直接點擊連結。";
-                } else if (debugInfo.value.isUuid) {
-                    // 已修改：不再設定 error.value 來阻擋，改為 console.warn
-                    console.warn("注意：偵測到 ID 為測試格式 (UUID)。");
-                    // 為了方便你開發，這裡不再顯示紅字阻擋，但風險自負
+                if (!finalGid) {
+                    error.value = "警告：無法取得群組 ID。請確認你是點擊機器人的按鈕進入。";
                 }
 
-                if (gid) {
+                if (finalGid) {
                     // 1. Sync User
                     await callApi('syncUser', {
                         userId: user.value.userId,
                         displayName: user.value.displayName,
                         pictureUrl: user.value.pictureUrl,
-                        groupId: gid
+                        groupId: finalGid
                     });
                     // 2. Fetch Projects
-                    await fetchProjects(gid);
+                    await fetchProjects(finalGid);
                 }
             } catch (err) {
                 error.value = "初始化失敗: " + err.message;
@@ -460,7 +469,6 @@ createApp({
             }
         };
 
-        // UI Helpers
         const toggleSplitMember = (uid) => {
             const idx = form.value.splitMembers.indexOf(uid);
             if (idx > -1) form.value.splitMembers.splice(idx, 1);
