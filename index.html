@@ -10,134 +10,136 @@
     <style>
         .loader { border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        .fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease; }
-        .fade-enter-from, .fade-leave-to { opacity: 0; }
     </style>
 </head>
 <body class="bg-gray-100 text-gray-800 font-sans">
     <div id="app" class="max-w-md mx-auto min-h-screen bg-white shadow-lg relative flex flex-col">
         
         <!-- Header -->
-        <header class="bg-slate-800 text-white p-4 flex justify-between items-center sticky top-0 z-50">
+        <header class="bg-slate-800 text-white p-4 flex justify-between items-center sticky top-0 z-50 shadow-md">
             <div class="flex items-center gap-2">
-                <button v-if="currentView !== 'projectList' && !loading" @click="goBack" class="text-white text-xl pr-2">←</button>
+                <button v-if="currentView !== 'projectList' && !loading" @click="goBack" class="text-white text-xl pr-2 hover:text-gray-300">←</button>
                 <div>
-                    <h1 class="text-lg font-bold">{{ headerTitle }}</h1>
-                    <p v-if="currentProject" class="text-xs text-gray-400">{{ currentProject.name }}</p>
+                    <h1 class="text-lg font-bold tracking-wide">{{ headerTitle }}</h1>
+                    <p v-if="currentProject" class="text-xs text-blue-200">{{ currentProject.name }}</p>
                 </div>
             </div>
             <div v-if="user" class="flex items-center gap-2">
-                <img :src="user.pictureUrl || 'https://via.placeholder.com/30'" class="w-8 h-8 rounded-full border border-gray-500">
+                <img :src="user.pictureUrl || 'https://via.placeholder.com/30'" class="w-8 h-8 rounded-full border-2 border-slate-600">
             </div>
         </header>
 
-        <!-- Loading Overlay -->
-        <div v-if="loading" class="absolute inset-0 bg-white/90 z-40 flex flex-col items-center justify-center">
-            <div class="loader mb-2"></div>
-            <p class="text-sm text-gray-500">{{ loadingText }}</p>
+        <!-- Loading -->
+        <div v-if="loading" class="absolute inset-0 bg-white/95 z-40 flex flex-col items-center justify-center">
+            <div class="loader mb-3"></div>
+            <p class="text-sm text-gray-500 font-medium">{{ loadingText }}</p>
         </div>
 
         <!-- Main Content -->
         <main class="flex-1 p-4 pb-24 overflow-y-auto">
             
             <!-- Error Alert -->
-            <div v-if="error" class="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-4 relative break-all" role="alert">
-                <strong class="font-bold block mb-1">發生錯誤：</strong>
-                <span class="block sm:inline text-sm">{{ error }}</span>
-                
-                <!-- Debug Suggestion -->
-                <div v-if="error.includes('Load failed') || error.includes('Fetch')" class="mt-2 text-xs text-red-800 bg-red-200 p-2 rounded">
-                    <p class="font-bold">💡 顧問診斷：</p>
-                    <p>這通常代表 GAS 部署權限設定錯誤。</p>
-                    <ol class="list-decimal ml-4 mt-1">
-                        <li>請確認 GAS 部署權限為「所有人 (Anyone)」。</li>
-                        <li>請確認 GAS_API_URL 網址正確。</li>
-                    </ol>
-                </div>
-
-                <span @click="error = null" class="absolute top-0 bottom-0 right-0 px-4 py-3 cursor-pointer font-bold">×</span>
+            <div v-if="error" class="bg-red-50 border-l-4 border-red-500 text-red-700 p-4 mb-4 relative rounded-r shadow-sm">
+                <strong class="font-bold block mb-1">⚠️ 發生錯誤</strong>
+                <span class="block text-sm break-all">{{ error }}</span>
+                <button @click="error = null" class="absolute top-2 right-2 text-red-400 hover:text-red-600 font-bold">×</button>
             </div>
 
-            <!-- Setup Check Alert -->
-            <div v-if="setupError" class="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 mb-4">
-                <p class="font-bold">⚠️ 設定尚未完成</p>
-                <p class="text-sm mt-1">請打開 index.html 修改以下變數：</p>
-                <ul class="list-disc ml-5 text-sm mt-1">
-                    <li v-if="setupError.includes('LIFF')">LIFF_ID 尚未填寫</li>
-                    <li v-if="setupError.includes('GAS')">GAS_API_URL 尚未填寫</li>
-                </ul>
+            <!-- Debug Info (Dev Mode) -->
+            <div v-if="debugMode" class="bg-gray-800 text-green-400 p-2 text-xs font-mono mb-2 rounded overflow-x-auto">
+                Group ID: {{ currentGroupId }}
             </div>
 
-            <!-- VIEW 1: PROJECT LIST (Entrance) -->
+            <!-- VIEW 1: PROJECT LIST -->
             <div v-if="currentView === 'projectList'">
                 <div class="flex justify-between items-center mb-4">
-                    <h2 class="text-gray-600 font-bold">選擇帳本</h2>
-                    <button @click="currentView = 'createProject'" class="bg-blue-600 text-white px-3 py-1.5 rounded-full text-sm shadow hover:bg-blue-700 transition">
-                        + 新增帳本
+                    <h2 class="text-gray-600 font-bold">我的群組帳本</h2>
+                    <button @click="currentView = 'createProject'" class="bg-blue-600 text-white px-4 py-1.5 rounded-full text-sm font-medium shadow hover:bg-blue-700 transition flex items-center gap-1">
+                        <span>+</span> 新增帳本
                     </button>
                 </div>
 
-                <div v-if="projects.length === 0 && !loading" class="text-center py-12 text-gray-400 border-2 border-dashed border-gray-200 rounded-lg">
-                    <p>目前沒有進行中的分帳活動</p>
-                    <p class="text-xs mt-2">點擊右上方按鈕建立第一個活動</p>
+                <div v-if="projects.length === 0 && !loading" class="text-center py-12 text-gray-400 border-2 border-dashed border-gray-200 rounded-xl">
+                    <p class="text-lg mb-2">📭</p>
+                    <p>這裡目前空空如也</p>
+                    <p class="text-xs mt-2">點擊右上角按鈕建立第一個活動</p>
+                    <!-- Debug trigger -->
+                    <p class="text-[10px] mt-8 text-gray-300 cursor-pointer" @click="debugMode = !debugMode">Display ID: {{ currentGroupId ? currentGroupId.substring(0,5)+'...' : 'None' }}</p>
                 </div>
 
                 <div class="grid gap-3">
                     <div v-for="p in projects" :key="p.id" @click="enterProject(p)" 
-                        class="bg-white border rounded-xl p-4 shadow-sm hover:shadow-md transition cursor-pointer active:scale-95 border-l-4 border-l-blue-500">
-                        <div class="flex justify-between items-start">
-                            <h3 class="font-bold text-lg text-gray-800">{{ p.name }}</h3>
-                            <span class="text-xs bg-gray-100 text-gray-500 px-2 py-1 rounded-full">進行中</span>
+                        class="bg-white border border-gray-100 rounded-xl p-4 shadow-sm hover:shadow-md transition cursor-pointer active:scale-[0.98] border-l-4 border-l-blue-500 relative overflow-hidden">
+                        <div class="flex justify-between items-start z-10 relative">
+                            <div>
+                                <h3 class="font-bold text-lg text-gray-800">{{ p.name }}</h3>
+                                <p class="text-xs text-gray-400 mt-1">{{ formatDate(p.timestamp) }} 建立</p>
+                            </div>
+                            <span class="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded-full font-medium">進行中</span>
                         </div>
-                        <p class="text-xs text-gray-400 mt-2">建立於 {{ formatDate(p.timestamp) }}</p>
                     </div>
                 </div>
             </div>
 
             <!-- VIEW 2: CREATE PROJECT -->
             <div v-if="currentView === 'createProject'">
-                <h2 class="text-xl font-bold mb-6">建立新帳本</h2>
-                <form @submit.prevent="submitCreateProject" class="space-y-4">
+                <h2 class="text-xl font-bold mb-6 text-gray-800">建立新帳本</h2>
+                <form @submit.prevent="submitCreateProject" class="space-y-5">
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-1">活動名稱</label>
-                        <input v-model="newProjectName" type="text" required class="w-full rounded-lg border-gray-300 border p-3 focus:ring-2 focus:ring-blue-500 outline-none" placeholder="例如：2026 東京滑雪團">
+                        <input v-model="newProjectName" type="text" required class="w-full rounded-lg border-gray-300 border p-3 focus:ring-2 focus:ring-blue-500 outline-none transition" placeholder="例如：2026 東京滑雪團">
                     </div>
-                    <button type="submit" class="w-full bg-blue-600 text-white py-3 rounded-lg font-bold shadow-lg hover:bg-blue-700 transition">
-                        確認建立
-                    </button>
-                    <button type="button" @click="currentView = 'projectList'" class="w-full text-gray-500 py-2">取消</button>
+                    <div class="pt-4 space-y-3">
+                        <button type="submit" class="w-full bg-blue-600 text-white py-3 rounded-lg font-bold shadow hover:bg-blue-700 transition">
+                            確認建立
+                        </button>
+                        <button type="button" @click="currentView = 'projectList'" class="w-full bg-white border border-gray-300 text-gray-500 py-3 rounded-lg hover:bg-gray-50 transition">取消</button>
+                    </div>
                 </form>
             </div>
 
-            <!-- VIEW 3: EXPENSE LIST (Inside a Project) -->
+            <!-- VIEW 3: EXPENSE LIST -->
             <div v-if="currentView === 'expenseList'">
-                <div class="flex justify-between items-center mb-4 bg-gray-50 p-3 rounded-lg">
-                    <div class="text-sm text-gray-500">
-                        目前總支出: <span class="text-gray-900 font-bold text-lg">${{ totalExpense }}</span>
-                    </div>
-                    <button @click="currentView = 'addExpense'" class="bg-green-600 text-white px-4 py-2 rounded-lg shadow hover:bg-green-700 text-sm font-bold">
-                        記一筆
+                
+                <!-- Join Banner -->
+                <div v-if="!isMember" class="bg-yellow-50 border-yellow-200 border rounded-lg p-4 mb-4 flex flex-col items-center text-center gap-2 shadow-sm">
+                    <p class="text-yellow-800 font-bold text-sm">你還不是這個帳本的成員</p>
+                    <p class="text-xs text-yellow-600">加入後才能被選為分擔人</p>
+                    <button @click="joinProject" class="bg-yellow-500 text-white px-6 py-2 rounded-full font-bold text-sm shadow hover:bg-yellow-600 transition w-full mt-1">
+                        👋 我要加入
                     </button>
                 </div>
 
-                <div v-if="expenses.length === 0" class="text-center text-gray-400 py-10">
-                    此帳本還沒有任何紀錄
+                <!-- Stats Bar -->
+                <div class="flex justify-between items-center mb-4 bg-white p-3 rounded-xl shadow-sm border border-gray-100">
+                    <div class="text-xs text-gray-500 flex flex-col">
+                        <span>總支出</span>
+                        <span class="text-gray-900 font-bold text-lg">${{ totalExpense }}</span>
+                    </div>
+                    <button v-if="isMember" @click="currentView = 'addExpense'" class="bg-green-600 text-white px-4 py-2 rounded-lg shadow hover:bg-green-700 text-sm font-bold flex items-center gap-1">
+                        ✏️ 記一筆
+                    </button>
                 </div>
 
-                <div v-for="exp in expenses" :key="exp.id" class="bg-white border border-gray-200 rounded-lg p-3 mb-3 shadow-sm flex justify-between items-center">
+                <!-- List -->
+                <div v-if="expenses.length === 0" class="text-center text-gray-400 py-12">
+                    <p>尚無支出紀錄</p>
+                </div>
+
+                <div v-for="exp in expenses" :key="exp.id" class="bg-white border border-gray-100 rounded-xl p-3 mb-3 shadow-sm flex justify-between items-center">
                     <div class="flex items-center gap-3">
-                        <div class="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-xl overflow-hidden">
+                        <div class="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-xl overflow-hidden shrink-0">
                             <img v-if="users[exp.payerId]?.pictureUrl" :src="users[exp.payerId].pictureUrl" class="w-full h-full object-cover">
                             <span v-else>👤</span>
                         </div>
                         <div>
-                            <div class="font-bold text-gray-800 text-base">{{ exp.item }}</div>
+                            <div class="font-bold text-gray-800 text-base line-clamp-1">{{ exp.item }}</div>
                             <div class="text-xs text-gray-500">
                                 {{ getUserName(exp.payerId) }} 付款 • {{ formatDate(exp.timestamp) }}
                             </div>
                         </div>
                     </div>
-                    <div class="font-mono text-lg font-bold text-green-700">
+                    <div class="font-mono text-lg font-bold text-green-600 shrink-0">
                         ${{ exp.amount }}
                     </div>
                 </div>
@@ -145,63 +147,68 @@
 
             <!-- VIEW 4: ADD EXPENSE -->
             <div v-if="currentView === 'addExpense'">
-                <h2 class="text-xl font-bold mb-4">新增支出</h2>
+                <h2 class="text-xl font-bold mb-4 text-gray-800">新增支出</h2>
                 <form @submit.prevent="submitExpense" class="space-y-4">
                     <div>
-                        <label class="block text-sm font-medium text-gray-700">項目</label>
-                        <input v-model="form.item" type="text" required class="w-full rounded-md border border-gray-300 p-2" placeholder="例：晚餐">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">項目名稱</label>
+                        <input v-model="form.item" type="text" required class="w-full rounded-lg border-gray-300 border p-2.5 focus:ring-2 focus:ring-green-500 outline-none" placeholder="例：晚餐、高鐵票">
                     </div>
                     <div>
-                        <label class="block text-sm font-medium text-gray-700">金額</label>
-                        <input v-model.number="form.amount" type="number" required class="w-full rounded-md border border-gray-300 p-2" placeholder="0">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">金額</label>
+                        <input v-model.number="form.amount" type="number" required class="w-full rounded-lg border-gray-300 border p-2.5 focus:ring-2 focus:ring-green-500 outline-none" placeholder="0">
                     </div>
                     <div>
-                        <label class="block text-sm font-medium text-gray-700">誰先付？</label>
-                        <select v-model="form.payerId" class="w-full rounded-md border border-gray-300 p-2 bg-white">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">誰先付？</label>
+                        <select v-model="form.payerId" class="w-full rounded-lg border-gray-300 border p-2.5 bg-white">
                             <option v-for="(u, id) in users" :value="id">{{ u.displayName }}</option>
                         </select>
                     </div>
                     <div>
                         <div class="flex justify-between items-center mb-2">
-                            <label class="block text-sm font-medium text-gray-700">分擔成員</label>
-                            <button type="button" @click="selectAllMembers" class="text-xs text-blue-500">全選</button>
+                            <label class="block text-sm font-medium text-gray-700">誰要分擔？ ({{ form.splitMembers.length }})</label>
+                            <button type="button" @click="selectAllMembers" class="text-xs text-blue-500 font-medium">全選</button>
                         </div>
-                        <div class="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto">
+                        <div class="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
                             <div v-for="(u, id) in users" :key="id" 
                                 @click="toggleSplitMember(id)"
                                 :class="{'bg-green-50 border-green-500 ring-1 ring-green-500': form.splitMembers.includes(id), 'bg-white border-gray-200': !form.splitMembers.includes(id)}"
-                                class="p-2 border rounded cursor-pointer text-sm flex items-center gap-2 transition-all">
-                                <img :src="u.pictureUrl || 'https://via.placeholder.com/20'" class="w-6 h-6 rounded-full">
+                                class="p-2 border rounded-lg cursor-pointer text-sm flex items-center gap-2 transition-all select-none">
+                                <img :src="u.pictureUrl || 'https://via.placeholder.com/20'" class="w-6 h-6 rounded-full shrink-0">
                                 <span class="truncate">{{ u.displayName }}</span>
                             </div>
                         </div>
+                        <p class="text-[10px] text-gray-400 mt-2 text-right">找不到人？請他也打開此網頁並點擊「加入」</p>
                     </div>
                     <div class="pt-4 grid grid-cols-2 gap-3">
-                        <button type="button" @click="currentView = 'expenseList'" class="bg-gray-200 text-gray-700 py-3 rounded-lg font-bold">取消</button>
-                        <button type="submit" class="bg-green-600 text-white py-3 rounded-lg font-bold shadow">儲存</button>
+                        <button type="button" @click="currentView = 'expenseList'" class="bg-gray-100 text-gray-600 py-3 rounded-lg font-bold hover:bg-gray-200 transition">取消</button>
+                        <button type="submit" class="bg-green-600 text-white py-3 rounded-lg font-bold shadow hover:bg-green-700 transition">儲存</button>
                     </div>
                 </form>
             </div>
 
             <!-- VIEW 5: SETTLE -->
             <div v-if="currentView === 'settle'">
-                <h2 class="text-xl font-bold mb-4">結帳建議</h2>
-                <div class="bg-blue-50 text-blue-700 p-3 rounded text-sm mb-4">
-                    針對「{{ currentProject.name }}」的最小轉帳路徑建議。
+                <h2 class="text-xl font-bold mb-4 text-gray-800">結算方案</h2>
+                <div class="bg-blue-50 text-blue-800 p-4 rounded-xl text-sm mb-4 border border-blue-100 shadow-sm">
+                    <p class="font-bold mb-1">💡 最佳還款路徑</p>
+                    <p class="text-blue-600 text-xs">系統已自動計算最小轉帳次數，請依下列指示還款。</p>
                 </div>
 
-                <div v-if="settlement.length === 0" class="text-center py-8 text-gray-500">
-                    帳目已平，無需轉帳。
+                <div v-if="settlement.length === 0" class="text-center py-12 text-gray-400 bg-white rounded-xl border border-dashed">
+                    <p class="text-2xl mb-2">🎉</p>
+                    <p>帳目已結清，無需轉帳！</p>
                 </div>
 
-                <div v-for="(tx, idx) in settlement" :key="idx" class="bg-white border rounded-lg p-4 mb-3 shadow-sm flex items-center justify-between">
-                    <div class="flex items-center gap-2 text-sm">
-                        <div class="flex flex-col items-center">
-                            <span class="font-bold text-gray-800">{{ getUserName(tx.from) }}</span>
+                <div v-for="(tx, idx) in settlement" :key="idx" class="bg-white border border-gray-100 rounded-xl p-4 mb-3 shadow-sm flex items-center justify-between">
+                    <div class="flex items-center gap-3 text-sm flex-1">
+                        <div class="flex flex-col items-center min-w-[3rem]">
+                            <span class="font-bold text-gray-800 truncate max-w-[4rem]">{{ getUserName(tx.from) }}</span>
+                            <span class="text-[10px] text-red-500">付款者</span>
                         </div>
-                        <div class="text-gray-400">➔</div>
-                        <div class="flex flex-col items-center">
-                            <span class="font-bold text-gray-800">{{ getUserName(tx.to) }}</span>
+                        <div class="text-gray-300">➜</div>
+                        <div class="flex flex-col items-center min-w-[3rem]">
+                            <span class="font-bold text-gray-800 truncate max-w-[4rem]">{{ getUserName(tx.to) }}</span>
+                            <span class="text-[10px] text-green-500">收款者</span>
                         </div>
                     </div>
                     <div class="font-mono text-xl font-bold text-blue-600">
@@ -212,15 +219,15 @@
 
         </main>
 
-        <!-- Bottom Nav (Only visible inside a project) -->
-        <nav v-if="['expenseList', 'settle'].includes(currentView)" class="bg-white border-t flex justify-around p-2 z-30">
-            <button @click="currentView = 'expenseList'" :class="{'text-green-600': currentView === 'expenseList'}" class="flex flex-col items-center p-2 text-gray-400">
-                <span class="text-xl">📝</span>
-                <span class="text-xs">明細</span>
+        <!-- Bottom Nav -->
+        <nav v-if="['expenseList', 'settle'].includes(currentView)" class="bg-white border-t flex justify-around p-2 z-30 pb- safe-area-bottom">
+            <button @click="currentView = 'expenseList'" :class="{'text-green-600 scale-110': currentView === 'expenseList'}" class="flex flex-col items-center p-2 text-gray-400 transition-all">
+                <span class="text-xl mb-0.5">📝</span>
+                <span class="text-[10px]">明細</span>
             </button>
-            <button @click="fetchSettlement" :class="{'text-blue-600': currentView === 'settle'}" class="flex flex-col items-center p-2 text-gray-400">
-                <span class="text-xl">⚖️</span>
-                <span class="text-xs">結算</span>
+            <button @click="fetchSettlement" :class="{'text-blue-600 scale-110': currentView === 'settle'}" class="flex flex-col items-center p-2 text-gray-400 transition-all">
+                <span class="text-xl mb-0.5">⚖️</span>
+                <span class="text-[10px]">結算</span>
             </button>
         </nav>
     </div>
@@ -228,163 +235,117 @@
 <script>
 const { createApp, ref, computed, onMounted } = Vue;
 
-// --- CONFIGURATION ---
-// ⚠️ 已根據您的要求填入，請直接部署 ⚠️
+// ⚠️ Configuration ⚠️
 const LIFF_ID = "2009031450-O3r9jaRJ"; 
 const GAS_API_URL = "https://script.google.com/macros/s/AKfycby-ErOoXEiRdFjgygzhCRZnYg7q1yZYWW_VSHOlaWZf__EqT0NVIXBMZMQJR5E1b0kH/exec"; 
 
 createApp({
     setup() {
+        // State
         const loading = ref(true);
-        const loadingText = ref('初始化中...');
+        const loadingText = ref('啟動中...');
         const error = ref(null);
-        const setupError = ref(null);
+        const debugMode = ref(false); // Toggle to see Group ID
         
-        // Views: projectList, createProject, expenseList, addExpense, settle
-        const currentView = ref('projectList'); 
-        
-        const user = ref(null); 
-        const context = ref(null); 
-        
+        const currentView = ref('projectList');
+        const user = ref(null);
+        const context = ref(null);
+        const currentGroupId = ref(''); // Store globally for debug
+
         // Data
         const projects = ref([]);
         const currentProject = ref(null);
         const expenses = ref([]);
         const users = ref({});
+        const memberIds = ref([]); // List of userIds joined in current project
         const settlement = ref([]);
 
-        // Forms
+        // Form
         const newProjectName = ref('');
-        const form = ref({
-            item: '',
-            amount: '',
-            payerId: '',
-            splitMembers: []
-        });
+        const form = ref({ item: '', amount: '', payerId: '', splitMembers: [] });
 
-        // Computed
+        // --- Computed ---
         const headerTitle = computed(() => {
-            if (currentView.value === 'projectList') return '分帳管家';
-            if (currentView.value === 'createProject') return '建立帳本';
-            return '帳本詳情';
+            const map = { projectList: '分帳小幫手', createProject: '建立活動', expenseList: '帳本明細', addExpense: '新增支出', settle: '結算' };
+            return map[currentView.value] || '分帳小幫手';
         });
 
-        const totalExpense = computed(() => {
-            return expenses.value.reduce((sum, item) => sum + Number(item.amount), 0);
+        const totalExpense = computed(() => expenses.value.reduce((sum, item) => sum + Number(item.amount), 0));
+        
+        const isMember = computed(() => {
+            if (!user.value || !memberIds.value) return false;
+            return memberIds.value.includes(user.value.userId);
         });
 
-        // --- API & UTILS ---
+        // --- Utils ---
         const formatDate = (ts) => {
             if (!ts) return '';
             const d = new Date(ts);
             return `${d.getMonth()+1}/${d.getDate()}`;
         };
 
-        const getUserName = (id) => users.value[id]?.displayName || '未知';
+        const getUserName = (id) => users.value[id]?.displayName || '未知用戶';
 
         const callApi = async (action, payload) => {
-            if (GAS_API_URL.includes("YOUR_GAS_WEB_APP_URL")) {
-                throw new Error("請先在 index.html 設定正確的 GAS_API_URL");
-            }
             try {
-                // 使用 text/plain 繞過 CORS Preflight
                 const response = await fetch(GAS_API_URL, {
                     method: 'POST',
                     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                     body: JSON.stringify({ action, payload })
                 });
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP Error: ${response.status}`);
-                }
-
                 const data = await response.json();
                 if (data.status === 'error') throw new Error(data.message);
                 return data;
             } catch (err) {
-                console.error("API Call Failed:", err);
-                // 優化錯誤顯示
-                let msg = err.message;
-                if (msg === 'Failed to fetch' || msg === 'Load failed') {
-                    msg = `連線被拒絕 (${msg})。請檢查 GAS 部署權限是否為「所有人 (Anyone)」。`;
-                }
-                error.value = msg;
+                console.error("API Error:", err);
+                error.value = err.message;
                 throw err;
             }
         };
 
-        // --- FLOWS ---
-
-        const checkConfig = () => {
-            let errs = [];
-            if (LIFF_ID.includes("YOUR_LIFF_ID")) errs.push("LIFF");
-            if (GAS_API_URL.includes("YOUR_GAS_WEB_APP_URL")) errs.push("GAS");
-            
-            if (errs.length > 0) {
-                setupError.value = errs;
-                loading.value = false;
-                return false;
-            }
-            return true;
-        };
-
+        // --- Core Logic ---
         const initLiff = async () => {
-            if (!checkConfig()) return;
-
             try {
                 await liff.init({ liffId: LIFF_ID });
                 if (!liff.isLoggedIn()) {
                     liff.login();
                     return;
                 }
+                user.value = await liff.getProfile();
+                context.value = liff.getContext();
                 
-                // 取得 Profile
-                try {
-                    user.value = await liff.getProfile();
-                    context.value = liff.getContext();
-                } catch (e) {
-                    throw new Error("無法取得使用者資料，請確認 LIFF 已開啟 Profile 權限。");
+                // Get Group ID
+                const gid = context.value?.groupId || context.value?.roomId;
+                currentGroupId.value = gid || 'NO_GROUP_ID';
+
+                if (!gid) {
+                    error.value = "警告：無法取得群組 ID。請確認你是從群組對話開啟，而非直接點擊連結。";
+                    // For dev/testing, you might want to stop here, but we allow viewing UI
                 }
 
-                const groupId = context.value?.groupId || context.value?.roomId;
-                if (!groupId) {
-                    // 開發模式或非群組開啟
-                    // error.value = "請在 LINE 群組中開啟此頁面 (無法取得 Group ID)。";
-                    // loading.value = false;
-                    // return;
-                    
-                    // FOR DEBUG ONLY: 如果不在群組，允許操作但給個提示，或者給個假 ID
-                    // 為了讓你測試成功，我們先給個警告但允許繼續，如果後端支援無 Group ID 列表查詢
-                    // 但我們的後端 getProjects 需要 groupId。
-                    // 這裡顯示比較友善的錯誤
-                    error.value = "警告：無法取得群組 ID。請確認你是從群組對話的 LIFF 連結進入，而非直接點擊網址。";
-                    loading.value = false;
-                    return;
+                if (gid) {
+                    // 1. Sync User
+                    await callApi('syncUser', {
+                        userId: user.value.userId,
+                        displayName: user.value.displayName,
+                        pictureUrl: user.value.pictureUrl,
+                        groupId: gid
+                    });
+                    // 2. Fetch Projects
+                    await fetchProjects(gid);
                 }
-
-                // 1. Sync User info
-                await callApi('syncUser', {
-                    userId: user.value.userId,
-                    displayName: user.value.displayName,
-                    pictureUrl: user.value.pictureUrl,
-                    groupId: groupId
-                });
-
-                // 2. Fetch Project List
-                await fetchProjects(groupId);
-
             } catch (err) {
-                error.value = "系統初始化失敗: " + err.message;
+                error.value = "初始化失敗: " + err.message;
             } finally {
                 loading.value = false;
             }
         };
 
-        const fetchProjects = async (groupId) => {
+        const fetchProjects = async (gid) => {
             loading.value = true;
-            loadingText.value = "讀取帳本列表...";
+            loadingText.value = "搜尋帳本...";
             try {
-                const res = await callApi('getProjects', { groupId });
+                const res = await callApi('getProjects', { groupId: gid });
                 projects.value = res.projects;
                 currentView.value = 'projectList';
             } finally {
@@ -396,16 +357,13 @@ createApp({
             if (!newProjectName.value) return;
             loading.value = true;
             try {
-                const groupId = context.value?.groupId || context.value?.roomId;
-                if (!groupId) throw new Error("無群組 ID，無法建立。");
-
                 await callApi('createProject', {
                     name: newProjectName.value,
                     ownerId: user.value.userId,
-                    boundGroupId: groupId
+                    boundGroupId: currentGroupId.value
                 });
                 newProjectName.value = '';
-                await fetchProjects(groupId); 
+                await fetchProjects(currentGroupId.value);
             } finally {
                 loading.value = false;
             }
@@ -414,45 +372,41 @@ createApp({
         const enterProject = async (project) => {
             currentProject.value = project;
             loading.value = true;
-            loadingText.value = "載入帳目細節...";
+            loadingText.value = "載入中...";
             try {
                 const res = await callApi('getProjectDetails', { projectId: project.id });
                 expenses.value = res.expenses;
-                users.value = res.users; 
+                users.value = res.users;
+                memberIds.value = res.memberIds || [];
                 
+                // Defaults for form
                 form.value.payerId = user.value.userId;
-                form.value.splitMembers = Object.keys(users.value);
-
+                // Only default select joined members
+                form.value.splitMembers = res.memberIds || []; 
+                
                 currentView.value = 'expenseList';
             } finally {
                 loading.value = false;
             }
         };
 
-        const goBack = () => {
-            if (['addExpense', 'settle'].includes(currentView.value)) {
-                currentView.value = 'expenseList';
-            } else if (currentView.value === 'expenseList' || currentView.value === 'createProject') {
-                currentView.value = 'projectList';
-                currentProject.value = null;
+        const joinProject = async () => {
+            loading.value = true;
+            try {
+                await callApi('joinProject', {
+                    projectId: currentProject.value.id,
+                    userId: user.value.userId
+                });
+                // Reload details to update member list
+                await enterProject(currentProject.value);
+            } finally {
+                loading.value = false;
             }
         };
 
-        // --- EXPENSE LOGIC ---
-
-        const toggleSplitMember = (uid) => {
-            const idx = form.value.splitMembers.indexOf(uid);
-            if (idx > -1) form.value.splitMembers.splice(idx, 1);
-            else form.value.splitMembers.push(uid);
-        };
-
-        const selectAllMembers = () => {
-            form.value.splitMembers = Object.keys(users.value);
-        }
-
         const submitExpense = async () => {
             if (form.value.splitMembers.length === 0) {
-                alert("至少需要一位分擔者");
+                alert("請至少選擇一位分擔成員");
                 return;
             }
             loading.value = true;
@@ -465,9 +419,9 @@ createApp({
                     splitMembers: form.value.splitMembers
                 });
                 
+                // Quick refresh
                 const res = await callApi('getProjectDetails', { projectId: currentProject.value.id });
                 expenses.value = res.expenses;
-                
                 form.value.item = '';
                 form.value.amount = '';
                 currentView.value = 'expenseList';
@@ -475,7 +429,7 @@ createApp({
                 loading.value = false;
             }
         };
-
+        
         const fetchSettlement = async () => {
             loading.value = true;
             try {
@@ -487,16 +441,36 @@ createApp({
             }
         };
 
+        const goBack = () => {
+            if (['addExpense', 'settle'].includes(currentView.value)) {
+                currentView.value = 'expenseList';
+            } else {
+                currentView.value = 'projectList';
+                currentProject.value = null;
+            }
+        };
+
+        // UI Helpers
+        const toggleSplitMember = (uid) => {
+            const idx = form.value.splitMembers.indexOf(uid);
+            if (idx > -1) form.value.splitMembers.splice(idx, 1);
+            else form.value.splitMembers.push(uid);
+        };
+        const selectAllMembers = () => {
+            // Only select members who have joined (keys in users map)
+            form.value.splitMembers = Object.keys(users.value);
+        }
+
         onMounted(() => {
             initLiff();
         });
 
         return {
-            loading, loadingText, error, setupError, currentView, user, 
-            projects, currentProject, expenses, users, settlement,
+            loading, loadingText, error, debugMode, currentView, user, currentGroupId,
+            projects, currentProject, expenses, users, settlement, isMember,
             newProjectName, form, headerTitle, totalExpense,
             formatDate, getUserName, goBack, submitCreateProject, 
-            enterProject, toggleSplitMember, selectAllMembers, submitExpense, fetchSettlement
+            enterProject, joinProject, toggleSplitMember, selectAllMembers, submitExpense, fetchSettlement
         };
     }
 }).mount('#app');
