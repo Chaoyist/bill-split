@@ -29,6 +29,16 @@
             </div>
         </header>
 
+        <!-- DIAGNOSTIC PANEL (DEBUG) -->
+        <!-- 這是為了讓你確認 LINE 到底傳了什麼 ID 給你 -->
+        <div class="bg-black text-green-400 p-2 text-[10px] font-mono break-all overflow-hidden" v-if="debugInfo">
+            <p><strong>TYPE:</strong> {{ debugInfo.type }}</p>
+            <p><strong>GID:</strong> {{ debugInfo.groupId || 'null' }}</p>
+            <p><strong>RID:</strong> {{ debugInfo.roomId || 'null' }}</p>
+            <p><strong>UID:</strong> {{ debugInfo.userId }}</p>
+            <p v-if="debugInfo.isUuid">⚠️ 警告：ID 為 UUID 格式，這通常是測試模式，非真實群組。</p>
+        </div>
+
         <!-- Loading -->
         <div v-if="loading" class="absolute inset-0 bg-white/95 z-40 flex flex-col items-center justify-center">
             <div class="loader mb-3"></div>
@@ -45,11 +55,6 @@
                 <button @click="error = null" class="absolute top-2 right-2 text-red-400 hover:text-red-600 font-bold">×</button>
             </div>
 
-            <!-- Debug Info (Dev Mode) -->
-            <div v-if="debugMode" class="bg-gray-800 text-green-400 p-2 text-xs font-mono mb-2 rounded overflow-x-auto">
-                Group ID: {{ currentGroupId }}
-            </div>
-
             <!-- VIEW 1: PROJECT LIST -->
             <div v-if="currentView === 'projectList'">
                 <div class="flex justify-between items-center mb-4">
@@ -63,8 +68,6 @@
                     <p class="text-lg mb-2">📭</p>
                     <p>這裡目前空空如也</p>
                     <p class="text-xs mt-2">點擊右上角按鈕建立第一個活動</p>
-                    <!-- Debug trigger -->
-                    <p class="text-[10px] mt-8 text-gray-300 cursor-pointer" @click="debugMode = !debugMode">Display ID: {{ currentGroupId ? currentGroupId.substring(0,5)+'...' : 'None' }}</p>
                 </div>
 
                 <div class="grid gap-3">
@@ -245,19 +248,19 @@ createApp({
         const loading = ref(true);
         const loadingText = ref('啟動中...');
         const error = ref(null);
-        const debugMode = ref(false); // Toggle to see Group ID
         
         const currentView = ref('projectList');
         const user = ref(null);
         const context = ref(null);
-        const currentGroupId = ref(''); // Store globally for debug
+        const currentGroupId = ref('');
+        const debugInfo = ref(null); // 用於診斷
 
         // Data
         const projects = ref([]);
         const currentProject = ref(null);
         const expenses = ref([]);
         const users = ref({});
-        const memberIds = ref([]); // List of userIds joined in current project
+        const memberIds = ref([]);
         const settlement = ref([]);
 
         // Form
@@ -314,13 +317,25 @@ createApp({
                 user.value = await liff.getProfile();
                 context.value = liff.getContext();
                 
-                // Get Group ID
-                const gid = context.value?.groupId || context.value?.roomId;
+                const ctx = context.value || {};
+                const gid = ctx.groupId || ctx.roomId;
                 currentGroupId.value = gid || 'NO_GROUP_ID';
 
+                // --- 診斷邏輯 ---
+                debugInfo.value = {
+                    type: ctx.type,
+                    groupId: ctx.groupId,
+                    roomId: ctx.roomId,
+                    userId: ctx.userId,
+                    isUuid: /^[0-9a-f]{8}-[0-9a-f]{4}/.test(gid || '') // 偵測是否為 UUID
+                };
+                
                 if (!gid) {
                     error.value = "警告：無法取得群組 ID。請確認你是從群組對話開啟，而非直接點擊連結。";
-                    // For dev/testing, you might want to stop here, but we allow viewing UI
+                    // loading.value = false; // Dev mode: allow viewing
+                } else if (debugInfo.value.isUuid) {
+                    // 如果檢測到 UUID，提示使用者
+                    error.value = "注意：偵測到 ID 為測試格式 (UUID)。這通常發生在開發者工具或模擬環境。請在真實 LINE 群組測試以確保資料正確。";
                 }
 
                 if (gid) {
@@ -379,9 +394,7 @@ createApp({
                 users.value = res.users;
                 memberIds.value = res.memberIds || [];
                 
-                // Defaults for form
                 form.value.payerId = user.value.userId;
-                // Only default select joined members
                 form.value.splitMembers = res.memberIds || []; 
                 
                 currentView.value = 'expenseList';
@@ -397,7 +410,6 @@ createApp({
                     projectId: currentProject.value.id,
                     userId: user.value.userId
                 });
-                // Reload details to update member list
                 await enterProject(currentProject.value);
             } finally {
                 loading.value = false;
@@ -419,7 +431,6 @@ createApp({
                     splitMembers: form.value.splitMembers
                 });
                 
-                // Quick refresh
                 const res = await callApi('getProjectDetails', { projectId: currentProject.value.id });
                 expenses.value = res.expenses;
                 form.value.item = '';
@@ -457,7 +468,6 @@ createApp({
             else form.value.splitMembers.push(uid);
         };
         const selectAllMembers = () => {
-            // Only select members who have joined (keys in users map)
             form.value.splitMembers = Object.keys(users.value);
         }
 
@@ -466,7 +476,7 @@ createApp({
         });
 
         return {
-            loading, loadingText, error, debugMode, currentView, user, currentGroupId,
+            loading, loadingText, error, debugInfo, currentView, user, currentGroupId,
             projects, currentProject, expenses, users, settlement, isMember,
             newProjectName, form, headerTitle, totalExpense,
             formatDate, getUserName, goBack, submitCreateProject, 
