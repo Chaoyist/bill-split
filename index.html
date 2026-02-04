@@ -29,14 +29,6 @@
             </div>
         </header>
 
-        <!-- DIAGNOSTIC PANEL (DEBUG) -->
-        <div class="bg-black text-green-400 p-2 text-[10px] font-mono break-all overflow-hidden" v-if="debugInfo">
-            <p><strong>SRC:</strong> {{ debugInfo.source }}</p>
-            <p><strong>GID:</strong> {{ debugInfo.groupId }}</p>
-            <p v-if="debugInfo.source === 'URL_PARAM'" class="text-yellow-300">✅ 已鎖定真實群組 ID</p>
-            <p v-else-if="debugInfo.isUuid" class="text-red-400">⚠️ UUID 模式 (資料無法保存)</p>
-        </div>
-
         <!-- Loading -->
         <div v-if="loading" class="absolute inset-0 bg-white/95 z-40 flex flex-col items-center justify-center">
             <div class="loader mb-3"></div>
@@ -258,7 +250,6 @@
 const { createApp, ref, computed, onMounted } = Vue;
 
 const LIFF_ID = "2009031450-O3r9jaRJ"; 
-// ⚠️ 已經鎖定，絕不更改
 const GAS_API_URL = "https://script.google.com/macros/s/AKfycbwJD0Qzvb4cw7Hss2U6J-ATTHnQU0Pml6-gyQUE4osX_lXEiFG18HuQ_bR_o3didgxR1Q/exec"; 
 
 createApp({
@@ -436,7 +427,7 @@ createApp({
                     amount: form.value.amount,
                     item: form.value.item,
                     splitMembers: form.value.splitMembers,
-                    creatorId: user.value.userId // 傳遞建立者 ID
+                    creatorId: user.value.userId // Send creator ID
                 });
                 await enterProject(currentProject.value);
             } finally { loading.value = false; }
