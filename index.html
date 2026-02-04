@@ -30,13 +30,11 @@
         </header>
 
         <!-- DIAGNOSTIC PANEL (DEBUG) -->
-        <!-- 這是為了讓你確認 LINE 到底傳了什麼 ID 給你 -->
+        <!-- 黑色面板保留，方便你確認 ID 是否每次都在變 -->
         <div class="bg-black text-green-400 p-2 text-[10px] font-mono break-all overflow-hidden" v-if="debugInfo">
             <p><strong>TYPE:</strong> {{ debugInfo.type }}</p>
             <p><strong>GID:</strong> {{ debugInfo.groupId || 'null' }}</p>
-            <p><strong>RID:</strong> {{ debugInfo.roomId || 'null' }}</p>
-            <p><strong>UID:</strong> {{ debugInfo.userId }}</p>
-            <p v-if="debugInfo.isUuid">⚠️ 警告：ID 為 UUID 格式，這通常是測試模式，非真實群組。</p>
+            <p class="text-gray-500">若 GID 每次重整都變，資料將無法保存。</p>
         </div>
 
         <!-- Loading -->
@@ -239,6 +237,7 @@
 const { createApp, ref, computed, onMounted } = Vue;
 
 // ⚠️ Configuration ⚠️
+// 請確認這兩個變數與後端一致
 const LIFF_ID = "2009031450-O3r9jaRJ"; 
 const GAS_API_URL = "https://script.google.com/macros/s/AKfycby-ErOoXEiRdFjgygzhCRZnYg7q1yZYWW_VSHOlaWZf__EqT0NVIXBMZMQJR5E1b0kH/exec"; 
 
@@ -332,10 +331,10 @@ createApp({
                 
                 if (!gid) {
                     error.value = "警告：無法取得群組 ID。請確認你是從群組對話開啟，而非直接點擊連結。";
-                    // loading.value = false; // Dev mode: allow viewing
                 } else if (debugInfo.value.isUuid) {
-                    // 如果檢測到 UUID，提示使用者
-                    error.value = "注意：偵測到 ID 為測試格式 (UUID)。這通常發生在開發者工具或模擬環境。請在真實 LINE 群組測試以確保資料正確。";
+                    // 已修改：不再設定 error.value 來阻擋，改為 console.warn
+                    console.warn("注意：偵測到 ID 為測試格式 (UUID)。");
+                    // 為了方便你開發，這裡不再顯示紅字阻擋，但風險自負
                 }
 
                 if (gid) {
