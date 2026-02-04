@@ -1,477 +1,320 @@
-<!DOCTYPE html>
-<html lang="zh-TW">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>分帳小幫手</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-    <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
-    <style>
-        .loader { border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-    </style>
-</head>
-<body class="bg-gray-100 text-gray-800 font-sans">
-    <div id="app" class="max-w-md mx-auto min-h-screen bg-white shadow-lg relative flex flex-col">
-        
-        <!-- Header -->
-        <header class="bg-slate-800 text-white p-4 flex justify-between items-center sticky top-0 z-50 shadow-md">
-            <div class="flex items-center gap-2">
-                <button v-if="currentView !== 'projectList' && !loading" @click="goBack" class="text-white text-xl pr-2 hover:text-gray-300">←</button>
-                <div>
-                    <h1 class="text-lg font-bold tracking-wide">{{ headerTitle }}</h1>
-                    <p v-if="currentProject" class="text-xs text-blue-200">{{ currentProject.name }}</p>
-                </div>
-            </div>
-            <div v-if="user" class="flex items-center gap-2">
-                <img :src="user.pictureUrl || 'https://via.placeholder.com/30'" class="w-8 h-8 rounded-full border-2 border-slate-600">
-            </div>
-        </header>
+/**
+ * LINE Group Split Bill Backend v3.0 (Edit & Delete Support)
+ * Features: CRUD for Expenses
+ */
 
-        <!-- DIAGNOSTIC PANEL (DEBUG) -->
-        <div class="bg-black text-green-400 p-2 text-[10px] font-mono break-all overflow-hidden" v-if="debugInfo">
-            <p><strong>SRC:</strong> {{ debugInfo.source }}</p>
-            <p><strong>GID:</strong> {{ debugInfo.groupId }}</p>
-            <p v-if="debugInfo.source === 'URL_PARAM'" class="text-yellow-300">✅ 已鎖定真實群組 ID</p>
-            <p v-else-if="debugInfo.isUuid" class="text-red-400">⚠️ UUID 模式 (資料無法保存)</p>
-        </div>
+const CHANNEL_ACCESS_TOKEN = PropertiesService.getScriptProperties().getProperty('CHANNEL_ACCESS_TOKEN'); 
+const LIFF_ID = '2009031450-O3r9jaRJ'; 
 
-        <!-- Loading -->
-        <div v-if="loading" class="absolute inset-0 bg-white/95 z-40 flex flex-col items-center justify-center">
-            <div class="loader mb-3"></div>
-            <p class="text-sm text-gray-500 font-medium">{{ loadingText }}</p>
-        </div>
+const DB_SCHEMA = {
+  'Projects': ['id', 'name', 'ownerId', 'status', 'boundGroupId', 'timestamp'],
+  'Users': ['userId', 'displayName', 'pictureUrl', 'lastSeenGroupId', 'timestamp'],
+  'ProjectMembers': ['projectId', 'userId', 'joinedAt'],
+  'Expenses': ['projectId', 'id', 'payerId', 'amount', 'item', 'splitMembers', 'timestamp']
+};
 
-        <!-- Main Content -->
-        <main class="flex-1 p-4 pb-24 overflow-y-auto">
-            
-            <!-- Error Alert -->
-            <div v-if="error" class="bg-red-50 border-l-4 border-red-500 text-red-700 p-4 mb-4 relative rounded-r shadow-sm">
-                <strong class="font-bold block mb-1">⚠️ 發生錯誤</strong>
-                <span class="block text-sm break-all font-mono bg-red-100 p-1 rounded mb-2">{{ error }}</span>
-                <div v-if="isNetworkError" class="text-xs text-red-800 bg-red-100 p-2 rounded border border-red-200">
-                    <p class="font-bold mb-1">💡 顧問診斷：連線被拒絕</p>
-                    <p>手機版請嘗試：1. 關閉 LIFF 再重開 2. 檢查網路</p>
-                    <p>若問題持續，請確認 GAS 部署權限為「所有人」。</p>
-                </div>
-                <button @click="error = null" class="absolute top-2 right-2 text-red-400 hover:text-red-600 font-bold">×</button>
-            </div>
+function setupDatabase() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  Object.keys(DB_SCHEMA).forEach(sheetName => {
+    ensureSheet(ss, sheetName);
+  });
+}
 
-            <!-- VIEW 1: PROJECT LIST -->
-            <div v-if="currentView === 'projectList'">
-                <div class="flex justify-between items-center mb-4">
-                    <h2 class="text-gray-600 font-bold">我的群組帳本</h2>
-                    <button @click="openCreateProject" class="bg-blue-600 text-white px-4 py-1.5 rounded-full text-sm font-medium shadow hover:bg-blue-700 transition flex items-center gap-1">
-                        <span>+</span> 新增帳本
-                    </button>
-                </div>
-                <div v-if="projects.length === 0 && !loading" class="text-center py-12 text-gray-400 border-2 border-dashed border-gray-200 rounded-xl">
-                    <p class="text-lg mb-2">📭</p>
-                    <p>這裡目前空空如也</p>
-                </div>
-                <div class="grid gap-3">
-                    <div v-for="p in projects" :key="p.id" @click="enterProject(p)" 
-                        class="bg-white border border-gray-100 rounded-xl p-4 shadow-sm hover:shadow-md transition cursor-pointer active:scale-[0.98] border-l-4 border-l-blue-500 relative overflow-hidden">
-                        <div class="flex justify-between items-start z-10 relative">
-                            <div>
-                                <h3 class="font-bold text-lg text-gray-800">{{ p.name }}</h3>
-                                <p class="text-xs text-gray-400 mt-1">{{ formatDate(p.timestamp) }} 建立</p>
-                            </div>
-                            <span class="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded-full font-medium">進行中</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
+function ssGetSheet(name) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  return ensureSheet(ss, name);
+}
 
-            <!-- VIEW 2: CREATE PROJECT -->
-            <div v-if="currentView === 'createProject'">
-                <h2 class="text-xl font-bold mb-6 text-gray-800">建立新帳本</h2>
-                <form @submit.prevent="submitCreateProject" class="space-y-5">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">活動名稱</label>
-                        <input v-model="newProjectName" type="text" required class="w-full rounded-lg border-gray-300 border p-3 focus:ring-2 focus:ring-blue-500 outline-none transition" placeholder="例如：2026 東京滑雪團">
-                    </div>
-                    <div class="pt-4 space-y-3">
-                        <button type="submit" class="w-full bg-blue-600 text-white py-3 rounded-lg font-bold shadow hover:bg-blue-700 transition">確認建立</button>
-                        <button type="button" @click="currentView = 'projectList'" class="w-full bg-white border border-gray-300 text-gray-500 py-3 rounded-lg hover:bg-gray-50 transition">取消</button>
-                    </div>
-                </form>
-            </div>
-
-            <!-- VIEW 3: EXPENSE LIST -->
-            <div v-if="currentView === 'expenseList'">
-                <div v-if="!isMember" class="bg-yellow-50 border-yellow-200 border rounded-lg p-4 mb-4 flex flex-col items-center text-center gap-2 shadow-sm">
-                    <p class="text-yellow-800 font-bold text-sm">你還不是這個帳本的成員</p>
-                    <button @click="joinProject" class="bg-yellow-500 text-white px-6 py-2 rounded-full font-bold text-sm shadow hover:bg-yellow-600 transition w-full mt-1">👋 我要加入</button>
-                </div>
-
-                <div class="flex justify-between items-center mb-4 bg-white p-3 rounded-xl shadow-sm border border-gray-100">
-                    <div class="text-xs text-gray-500 flex flex-col">
-                        <span>總支出</span>
-                        <span class="text-gray-900 font-bold text-lg">${{ totalExpense }}</span>
-                    </div>
-                    <button v-if="isMember" @click="openAddExpense" class="bg-green-600 text-white px-4 py-2 rounded-lg shadow hover:bg-green-700 text-sm font-bold flex items-center gap-1">
-                        ✏️ 記一筆
-                    </button>
-                </div>
-
-                <div v-if="expenses.length === 0" class="text-center text-gray-400 py-12">
-                    <p>尚無支出紀錄</p>
-                </div>
-
-                <div v-for="exp in expenses" :key="exp.id" class="bg-white border border-gray-100 rounded-xl p-3 mb-3 shadow-sm flex justify-between items-start">
-                    <div class="flex gap-3 flex-1">
-                        <div class="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-xl overflow-hidden shrink-0 mt-1">
-                            <img v-if="users[exp.payerId]?.pictureUrl" :src="users[exp.payerId].pictureUrl" class="w-full h-full object-cover">
-                            <span v-else>👤</span>
-                        </div>
-                        <div class="flex-1 min-w-0">
-                            <div class="flex justify-between items-start">
-                                <div class="font-bold text-gray-800 text-base line-clamp-1">{{ exp.item }}</div>
-                                <div class="font-mono text-lg font-bold text-green-600 shrink-0 ml-2">${{ exp.amount }}</div>
-                            </div>
-                            <div class="text-xs text-gray-500 mt-1">
-                                {{ getUserName(exp.payerId) }} 付款 • {{ formatDate(exp.timestamp) }}
-                            </div>
-                            <!-- 顯示分擔者 -->
-                            <div class="text-[10px] text-gray-400 mt-1 line-clamp-2">
-                                分擔: {{ getSplitNames(exp.splitMembers) }}
-                            </div>
-                        </div>
-                    </div>
-                    <!-- 編輯/刪除按鈕 (只有自己或成員可見) -->
-                    <div class="flex flex-col gap-2 ml-2 pl-2 border-l border-gray-100 justify-center">
-                        <button @click="editExpense(exp)" class="text-gray-400 hover:text-blue-500 p-1">✏️</button>
-                        <button @click="confirmDelete(exp)" class="text-gray-400 hover:text-red-500 p-1">🗑️</button>
-                    </div>
-                </div>
-            </div>
-
-            <!-- VIEW 4: ADD/EDIT EXPENSE -->
-            <div v-if="currentView === 'addExpense'">
-                <h2 class="text-xl font-bold mb-4 text-gray-800">{{ formMode === 'edit' ? '編輯支出' : '新增支出' }}</h2>
-                <form @submit.prevent="submitExpense" class="space-y-4">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">項目名稱</label>
-                        <input v-model="form.item" type="text" required class="w-full rounded-lg border-gray-300 border p-2.5 focus:ring-2 focus:ring-green-500 outline-none" placeholder="例：晚餐、高鐵票">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">金額</label>
-                        <input v-model.number="form.amount" type="number" required class="w-full rounded-lg border-gray-300 border p-2.5 focus:ring-2 focus:ring-green-500 outline-none" placeholder="0">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">誰先付？</label>
-                        <select v-model="form.payerId" class="w-full rounded-lg border-gray-300 border p-2.5 bg-white">
-                            <option v-for="(u, id) in users" :value="id">{{ u.displayName }}</option>
-                        </select>
-                    </div>
-                    <div>
-                        <div class="flex justify-between items-center mb-2">
-                            <label class="block text-sm font-medium text-gray-700">誰要分擔？ ({{ form.splitMembers.length }})</label>
-                            <button type="button" @click="selectAllMembers" class="text-xs text-blue-500 font-medium">全選</button>
-                        </div>
-                        <div class="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
-                            <div v-for="(u, id) in users" :key="id" 
-                                @click="toggleSplitMember(id)"
-                                :class="{'bg-green-50 border-green-500 ring-1 ring-green-500': form.splitMembers.includes(id), 'bg-white border-gray-200': !form.splitMembers.includes(id)}"
-                                class="p-2 border rounded-lg cursor-pointer text-sm flex items-center gap-2 transition-all select-none">
-                                <img :src="u.pictureUrl || 'https://via.placeholder.com/20'" class="w-6 h-6 rounded-full shrink-0">
-                                <span class="truncate">{{ u.displayName }}</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="pt-4 grid grid-cols-2 gap-3">
-                        <button type="button" @click="currentView = 'expenseList'" class="bg-gray-100 text-gray-600 py-3 rounded-lg font-bold hover:bg-gray-200 transition">取消</button>
-                        <button type="submit" class="bg-green-600 text-white py-3 rounded-lg font-bold shadow hover:bg-green-700 transition">{{ formMode === 'edit' ? '更新' : '儲存' }}</button>
-                    </div>
-                </form>
-            </div>
-
-            <!-- VIEW 5: SETTLE -->
-            <div v-if="currentView === 'settle'">
-                <h2 class="text-xl font-bold mb-4 text-gray-800">結算方案</h2>
-                <div class="bg-blue-50 text-blue-800 p-4 rounded-xl text-sm mb-4 border border-blue-100 shadow-sm">
-                    <p class="font-bold mb-1">💡 最佳還款路徑</p>
-                    <p class="text-blue-600 text-xs">系統已自動計算最小轉帳次數，請依下列指示還款。</p>
-                </div>
-                <div v-if="settlement.length === 0" class="text-center py-12 text-gray-400 bg-white rounded-xl border border-dashed">
-                    <p class="text-2xl mb-2">🎉</p>
-                    <p>帳目已結清，無需轉帳！</p>
-                </div>
-                <div v-for="(tx, idx) in settlement" :key="idx" class="bg-white border border-gray-100 rounded-xl p-4 mb-3 shadow-sm flex items-center justify-between">
-                    <div class="flex items-center gap-3 text-sm flex-1">
-                        <div class="flex flex-col items-center min-w-[3rem]">
-                            <span class="font-bold text-gray-800 truncate max-w-[4rem]">{{ getUserName(tx.from) }}</span>
-                            <span class="text-[10px] text-red-500">付款者</span>
-                        </div>
-                        <div class="text-gray-300">➜</div>
-                        <div class="flex flex-col items-center min-w-[3rem]">
-                            <span class="font-bold text-gray-800 truncate max-w-[4rem]">{{ getUserName(tx.to) }}</span>
-                            <span class="text-[10px] text-green-500">收款者</span>
-                        </div>
-                    </div>
-                    <div class="font-mono text-xl font-bold text-blue-600">${{ tx.amount }}</div>
-                </div>
-            </div>
-
-        </main>
-
-        <!-- Bottom Nav -->
-        <nav v-if="['expenseList', 'settle'].includes(currentView)" class="bg-white border-t flex justify-around p-2 z-30 pb- safe-area-bottom">
-            <button @click="currentView = 'expenseList'" :class="{'text-green-600 scale-110': currentView === 'expenseList'}" class="flex flex-col items-center p-2 text-gray-400 transition-all">
-                <span class="text-xl mb-0.5">📝</span>
-                <span class="text-[10px]">明細</span>
-            </button>
-            <button @click="fetchSettlement" :class="{'text-blue-600 scale-110': currentView === 'settle'}" class="flex flex-col items-center p-2 text-gray-400 transition-all">
-                <span class="text-xl mb-0.5">⚖️</span>
-                <span class="text-[10px]">結算</span>
-            </button>
-        </nav>
-    </div>
-
-<script>
-const { createApp, ref, computed, onMounted } = Vue;
-
-const LIFF_ID = "2009031450-O3r9jaRJ"; 
-const GAS_API_URL = "https://script.google.com/macros/s/AKfycby-ErOoXEiRdFjgygzhCRZnYg7q1yZYWW_VSHOlaWZf__EqT0NVIXBMZMQJR5E1b0kH/exec"; 
-
-createApp({
-    setup() {
-        // State
-        const loading = ref(true);
-        const loadingText = ref('啟動中...');
-        const error = ref(null);
-        
-        const currentView = ref('projectList');
-        const user = ref(null);
-        const context = ref(null);
-        const currentGroupId = ref('');
-        const debugInfo = ref(null); 
-
-        // Data
-        const projects = ref([]);
-        const currentProject = ref(null);
-        const expenses = ref([]);
-        const users = ref({});
-        const memberIds = ref([]);
-        const settlement = ref([]);
-
-        // Form
-        const newProjectName = ref('');
-        const formMode = ref('add'); // 'add' or 'edit'
-        const form = ref({ id: null, item: '', amount: '', payerId: '', splitMembers: [] });
-
-        // --- Computed ---
-        const headerTitle = computed(() => {
-            const map = { projectList: '分帳小幫手', createProject: '建立活動', expenseList: '帳本明細', addExpense: formMode.value === 'edit' ? '編輯支出' : '新增支出', settle: '結算' };
-            return map[currentView.value] || '分帳小幫手';
-        });
-
-        const totalExpense = computed(() => expenses.value.reduce((sum, item) => sum + Number(item.amount), 0));
-        
-        const isMember = computed(() => {
-            if (!user.value || !memberIds.value) return false;
-            return memberIds.value.includes(user.value.userId);
-        });
-
-        const isNetworkError = computed(() => {
-            if (!error.value) return false;
-            const msg = error.value.toLowerCase();
-            return msg.includes('load failed') || msg.includes('failed to fetch') || msg.includes('network error');
-        });
-
-        // --- Utils ---
-        const formatDate = (ts) => {
-            if (!ts) return '';
-            const d = new Date(ts);
-            return `${d.getMonth()+1}/${d.getDate()}`;
-        };
-
-        const getUserName = (id) => users.value[id]?.displayName || '未知';
-        
-        const getSplitNames = (ids) => {
-            if (!ids || ids.length === 0) return '無';
-            if (ids.length === Object.keys(users.value).length && ids.length > 0) return '全員';
-            return ids.map(id => getUserName(id)).join(', ');
-        };
-
-        const callApi = async (action, payload) => {
-            try {
-                // 🚀 關鍵修正：加入 timestamp 避免手機快取
-                // 🚀 關鍵修正：加入 redirect: follow 確保跟隨 GAS 重導向
-                const targetUrl = `${GAS_API_URL}?t=${Date.now()}`;
-                
-                const response = await fetch(targetUrl, {
-                    method: 'POST',
-                    mode: 'cors', // Explicitly set CORS mode
-                    redirect: 'follow', // Explicitly follow redirects
-                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                    body: JSON.stringify({ action, payload })
-                });
-                const data = await response.json();
-                if (data.status === 'error') throw new Error(data.message);
-                return data;
-            } catch (err) {
-                console.error("API Error:", err);
-                error.value = err.message;
-                throw err;
-            }
-        };
-
-        // --- Core Logic ---
-        const initLiff = async () => {
-            try {
-                await liff.init({ liffId: LIFF_ID });
-                if (!liff.isLoggedIn()) { liff.login(); return; }
-                user.value = await liff.getProfile();
-                context.value = liff.getContext();
-                
-                const urlParams = new URLSearchParams(window.location.search);
-                const urlGroupId = urlParams.get('groupId');
-                const ctx = context.value || {};
-                const liffGroupId = ctx.groupId || ctx.roomId;
-                
-                let finalGid = urlGroupId || liffGroupId;
-                let idSource = urlGroupId ? 'URL_PARAM' : 'LIFF_CONTEXT';
-
-                currentGroupId.value = finalGid;
-                debugInfo.value = { source: idSource, groupId: finalGid, isUuid: /^[0-9a-f]{8}-[0-9a-f]{4}/.test(finalGid || '') };
-                
-                if (!finalGid) { error.value = "警告：無法取得群組 ID。請確認你是點擊機器人的按鈕進入。"; }
-
-                if (finalGid) {
-                    await callApi('syncUser', { userId: user.value.userId, displayName: user.value.displayName, pictureUrl: user.value.pictureUrl, groupId: finalGid });
-                    await fetchProjects(finalGid);
-                }
-            } catch (err) {
-                error.value = "初始化失敗: " + err.message;
-            } finally {
-                loading.value = false;
-            }
-        };
-
-        const fetchProjects = async (gid) => {
-            loading.value = true;
-            try {
-                const res = await callApi('getProjects', { groupId: gid });
-                projects.value = res.projects;
-                currentView.value = 'projectList';
-            } finally { loading.value = false; }
-        };
-
-        const openCreateProject = () => { currentView.value = 'createProject'; };
-        const submitCreateProject = async () => {
-            if (!newProjectName.value) return;
-            loading.value = true;
-            try {
-                await callApi('createProject', { name: newProjectName.value, ownerId: user.value.userId, boundGroupId: currentGroupId.value });
-                newProjectName.value = '';
-                await fetchProjects(currentGroupId.value);
-            } finally { loading.value = false; }
-        };
-
-        const enterProject = async (project) => {
-            currentProject.value = project;
-            loading.value = true;
-            loadingText.value = "載入中...";
-            try {
-                const res = await callApi('getProjectDetails', { projectId: project.id });
-                expenses.value = res.expenses;
-                users.value = res.users;
-                memberIds.value = res.memberIds || [];
-                currentView.value = 'expenseList';
-            } finally { loading.value = false; }
-        };
-
-        const joinProject = async () => {
-            loading.value = true;
-            try {
-                await callApi('joinProject', { projectId: currentProject.value.id, userId: user.value.userId });
-                await enterProject(currentProject.value);
-            } finally { loading.value = false; }
-        };
-
-        // --- Add / Edit Logic ---
-        const openAddExpense = () => {
-            formMode.value = 'add';
-            form.value = { id: null, item: '', amount: '', payerId: user.value.userId, splitMembers: memberIds.value || [] };
-            currentView.value = 'addExpense';
-        };
-
-        const editExpense = (exp) => {
-            formMode.value = 'edit';
-            // Deep copy to prevent modifying list directly
-            form.value = { 
-                id: exp.id, 
-                item: exp.item, 
-                amount: exp.amount, 
-                payerId: exp.payerId, 
-                splitMembers: exp.splitMembers || [] 
-            };
-            currentView.value = 'addExpense';
-        };
-
-        const submitExpense = async () => {
-            if (form.value.splitMembers.length === 0) { alert("請至少選擇一位分擔成員"); return; }
-            loading.value = true;
-            try {
-                const action = formMode.value === 'edit' ? 'updateExpense' : 'addExpense';
-                await callApi(action, {
-                    id: form.value.id, // Only used for update
-                    projectId: currentProject.value.id,
-                    payerId: form.value.payerId,
-                    amount: form.value.amount,
-                    item: form.value.item,
-                    splitMembers: form.value.splitMembers
-                });
-                await enterProject(currentProject.value); // Reload
-            } finally { loading.value = false; }
-        };
-
-        const confirmDelete = async (exp) => {
-            if (!confirm(`確定要刪除「${exp.item}」嗎？`)) return;
-            loading.value = true;
-            try {
-                await callApi('deleteExpense', { id: exp.id });
-                await enterProject(currentProject.value);
-            } finally { loading.value = false; }
-        };
-        
-        const fetchSettlement = async () => {
-            loading.value = true;
-            try {
-                const res = await callApi('settle', { projectId: currentProject.value.id });
-                settlement.value = res.transactions;
-                currentView.value = 'settle';
-            } finally { loading.value = false; }
-        };
-
-        const goBack = () => {
-            if (['addExpense', 'settle'].includes(currentView.value)) currentView.value = 'expenseList';
-            else { currentView.value = 'projectList'; currentProject.value = null; }
-        };
-
-        const toggleSplitMember = (uid) => {
-            const idx = form.value.splitMembers.indexOf(uid);
-            if (idx > -1) form.value.splitMembers.splice(idx, 1);
-            else form.value.splitMembers.push(uid);
-        };
-        const selectAllMembers = () => { form.value.splitMembers = Object.keys(users.value); }
-
-        onMounted(() => { initLiff(); });
-
-        return {
-            loading, loadingText, error, isNetworkError, debugInfo, currentView, user, currentGroupId,
-            projects, currentProject, expenses, users, settlement, isMember,
-            newProjectName, form, formMode, headerTitle, totalExpense,
-            formatDate, getUserName, getSplitNames, goBack, 
-            openCreateProject, submitCreateProject, enterProject, joinProject, 
-            openAddExpense, editExpense, confirmDelete, submitExpense,
-            toggleSplitMember, selectAllMembers, fetchSettlement
-        };
+function ensureSheet(ss, name) {
+  let sheet = ss.getSheetByName(name);
+  if (!sheet) {
+    if (DB_SCHEMA[name]) {
+      sheet = ss.insertSheet(name);
+      sheet.appendRow(DB_SCHEMA[name]);
+      sheet.setFrozenRows(1);
+    } else {
+      throw new Error(`Critical Error: Sheet "${name}" is not defined in schema.`);
     }
-}).mount('#app');
-</script>
-</body>
-</html>
+  }
+  return sheet;
+}
+
+function doPost(e) {
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(30000);
+  } catch (e) {
+    return createJsonResponse({ status: 'error', message: 'Server busy' });
+  }
+
+  try {
+    const postData = JSON.parse(e.postData.contents);
+
+    if (postData.events) {
+      handleLineWebhook(postData.events);
+      return ContentService.createTextOutput(JSON.stringify({status: 'ok'})).setMimeType(ContentService.MimeType.JSON);
+    } else if (postData.action) {
+      const result = handleClientApi(postData);
+      return createJsonResponse(result);
+    } else {
+      return createJsonResponse({ status: 'error', message: 'Invalid Request' });
+    }
+  } catch (err) {
+    console.error('API Error: ' + err.toString()); 
+    return createJsonResponse({ status: 'error', message: err.toString() });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function createJsonResponse(data) {
+  return ContentService.createTextOutput(JSON.stringify(data))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+// --- LINE Webhook ---
+
+function handleLineWebhook(events) {
+  events.forEach(event => {
+    if (event.type === 'message' && event.message.type === 'text') {
+      const text = event.message.text.trim();
+      const hasMention = event.message.mention && event.message.mention.mentions && event.message.mention.mentions.length > 0;
+      const groupId = event.source.groupId || event.source.roomId;
+
+      if (!groupId) return;
+
+      if (text.includes('分帳') || text.includes('記帳') || text.includes('分錢') || hasMention) {
+        replyLiffMessage(event.replyToken, groupId);
+      }
+    }
+  });
+}
+
+function replyLiffMessage(replyToken, groupId) {
+  if (!CHANNEL_ACCESS_TOKEN) return;
+  const liffUrl = `https://liff.line.me/${LIFF_ID}?groupId=${groupId}`;
+
+  const payload = {
+    replyToken: replyToken,
+    messages: [{
+      type: "flex",
+      altText: "開啟分帳小幫手",
+      contents: {
+        type: "bubble",
+        body: {
+          type: "box",
+          layout: "vertical",
+          contents: [
+            { type: "text", text: "分帳小幫手", weight: "bold", size: "xl", color: "#1DB446" },
+            { type: "text", text: "點擊下方按鈕開始管理帳務", size: "sm", color: "#aaaaaa", margin: "md" }
+          ]
+        },
+        footer: {
+          type: "box",
+          layout: "vertical",
+          contents: [
+            { type: "button", style: "primary", color: "#1DB446", action: { type: "uri", label: "開啟帳本", uri: liffUrl } }
+          ]
+        }
+      }
+    }]
+  };
+
+  try {
+    UrlFetchApp.fetch('https://api.line.me/v2/bot/message/reply', {
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + CHANNEL_ACCESS_TOKEN },
+      method: 'post',
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+  } catch (e) {
+    console.error('Line Reply Exception: ' + e.toString());
+  }
+}
+
+// --- Client API ---
+
+function handleClientApi(data) {
+  switch (data.action) {
+    case 'syncUser': return syncUser(data.payload);
+    case 'getProjects': return getProjects(data.payload.groupId);
+    case 'createProject': return createProject(data.payload);
+    case 'joinProject': return joinProject(data.payload);
+    case 'getProjectDetails': return getProjectDetails(data.payload.projectId);
+    case 'addExpense': return addExpense(data.payload);
+    case 'updateExpense': return updateExpense(data.payload); // New
+    case 'deleteExpense': return deleteExpense(data.payload); // New
+    case 'settle': return calculateSettlement(data.payload.projectId);
+    default: return { status: 'error', message: 'Unknown action' };
+  }
+}
+
+// ... syncUser, getProjects, createProject, joinProject, getProjectDetails ...
+// (These remain mostly same, simplified here for brevity, ensuring complete context in file)
+
+function syncUser(payload) {
+  const sheet = ssGetSheet('Users');
+  const { userId, displayName, pictureUrl, groupId } = payload;
+  const data = sheet.getDataRange().getValues();
+  let rowIndex = -1;
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0] === userId) { rowIndex = i + 1; break; }
+  }
+  const timestamp = new Date();
+  const gidStr = String(groupId);
+  if (rowIndex > 0) {
+    sheet.getRange(rowIndex, 2, 1, 4).setValues([[displayName, pictureUrl, gidStr, timestamp]]);
+  } else {
+    sheet.appendRow([userId, displayName, pictureUrl, gidStr, timestamp]);
+  }
+  return { status: 'success' };
+}
+
+function getProjects(groupId) {
+  const sheet = ssGetSheet('Projects');
+  const rows = sheet.getDataRange().getValues().slice(1);
+  const targetGid = String(groupId);
+  const projects = rows
+    .filter(r => String(r[4]) === targetGid && r[3] !== 'archived')
+    .map(r => ({ id: r[0], name: r[1], ownerId: r[2], status: r[3], timestamp: r[5] }));
+  projects.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+  return { status: 'success', projects: projects };
+}
+
+function createProject(payload) {
+  const pSheet = ssGetSheet('Projects');
+  const mSheet = ssGetSheet('ProjectMembers');
+  const { name, ownerId, boundGroupId } = payload;
+  const id = Utilities.getUuid();
+  const timestamp = new Date();
+  pSheet.appendRow([id, name, ownerId, 'active', String(boundGroupId), timestamp]);
+  mSheet.appendRow([id, ownerId, timestamp]);
+  return { status: 'success', projectId: id };
+}
+
+function joinProject(payload) {
+  const sheet = ssGetSheet('ProjectMembers');
+  const { projectId, userId } = payload;
+  const rows = sheet.getDataRange().getValues();
+  const exists = rows.some(r => r[0] === projectId && r[1] === userId);
+  if (!exists) sheet.appendRow([projectId, userId, new Date()]);
+  return { status: 'success' };
+}
+
+function getProjectDetails(projectId) {
+  const expSheet = ssGetSheet('Expenses');
+  const memSheet = ssGetSheet('ProjectMembers');
+  const userSheet = ssGetSheet('Users');
+  
+  const expRows = expSheet.getDataRange().getValues().slice(1);
+  const projectExpenses = expRows
+    .filter(r => r[0] === projectId)
+    .map(r => ({ 
+      id: r[1], 
+      payerId: r[2], 
+      amount: r[3], 
+      item: r[4], 
+      splitMembers: safeParse(r[5]), // Include splitMembers
+      timestamp: r[6] 
+    })).reverse();
+
+  const memRows = memSheet.getDataRange().getValues().slice(1);
+  const memberIds = memRows.filter(r => r[0] === projectId).map(r => r[1]); 
+  
+  const userRows = userSheet.getDataRange().getValues().slice(1);
+  const userMap = {};
+  userRows.forEach(r => {
+    const uid = r[0];
+    if (memberIds.includes(uid) || r[0]) { // Simplified user fetch
+        userMap[uid] = { userId: uid, displayName: r[1], pictureUrl: r[2] };
+    }
+  });
+  
+  return { status: 'success', expenses: projectExpenses, users: userMap, memberIds: memberIds };
+}
+
+function safeParse(jsonStr) {
+  try { return JSON.parse(jsonStr); } catch(e) { return []; }
+}
+
+function addExpense(payload) {
+  const sheet = ssGetSheet('Expenses');
+  const { projectId, payerId, amount, item, splitMembers } = payload;
+  const id = Utilities.getUuid();
+  // ['projectId', 'id', 'payerId', 'amount', 'item', 'splitMembers', 'timestamp']
+  sheet.appendRow([projectId, id, payerId, amount, item, JSON.stringify(splitMembers), new Date()]);
+  return { status: 'success', id: id };
+}
+
+// --- NEW CRUD ---
+
+function updateExpense(payload) {
+  const sheet = ssGetSheet('Expenses');
+  const { id, payerId, amount, item, splitMembers } = payload;
+  const data = sheet.getDataRange().getValues();
+  
+  // Find Row by Expense ID (Column B -> index 1)
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][1] === id) {
+      // Update columns C, D, E, F (payer, amount, item, split)
+      // Indexes: 2, 3, 4, 5
+      const rowIndex = i + 1;
+      sheet.getRange(rowIndex, 3, 1, 4).setValues([[payerId, amount, item, JSON.stringify(splitMembers)]]);
+      return { status: 'success' };
+    }
+  }
+  return { status: 'error', message: 'Expense not found' };
+}
+
+function deleteExpense(payload) {
+  const sheet = ssGetSheet('Expenses');
+  const { id } = payload;
+  const data = sheet.getDataRange().getValues();
+  
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][1] === id) {
+      sheet.deleteRow(i + 1);
+      return { status: 'success' };
+    }
+  }
+  return { status: 'error', message: 'Expense not found' };
+}
+
+function calculateSettlement(projectId) {
+  const expSheet = ssGetSheet('Expenses');
+  const rows = expSheet.getDataRange().getValues().slice(1);
+  const projectExpenses = rows.filter(r => r[0] === projectId);
+  
+  let balances = {}; 
+  projectExpenses.forEach(row => {
+    const payerId = row[2];
+    const amount = parseFloat(row[3]);
+    const splitMembers = safeParse(row[5]);
+    
+    if (!splitMembers.length) return;
+    const splitAmount = amount / splitMembers.length;
+    balances[payerId] = (balances[payerId] || 0) + amount;
+    splitMembers.forEach(uid => { balances[uid] = (balances[uid] || 0) - splitAmount; });
+  });
+  
+  let debtors = []; let creditors = [];
+  for (const [uid, amount] of Object.entries(balances)) {
+    const rounded = Math.round(amount * 100) / 100;
+    if (rounded < -0.01) debtors.push({ userId: uid, amount: rounded });
+    if (rounded > 0.01) creditors.push({ userId: uid, amount: rounded });
+  }
+  
+  debtors.sort((a, b) => a.amount - b.amount);
+  creditors.sort((a, b) => b.amount - a.amount);
+  
+  let transactions = []; let i = 0, j = 0;
+  while (i < debtors.length && j < creditors.length) {
+    let debtor = debtors[i]; let creditor = creditors[j];
+    let amount = Math.min(Math.abs(debtor.amount), creditor.amount);
+    transactions.push({ from: debtor.userId, to: creditor.userId, amount: Math.round(amount * 100) / 100 });
+    debtor.amount += amount; creditor.amount -= amount;
+    if (Math.abs(debtor.amount) < 0.01) i++;
+    if (creditor.amount < 0.01) j++;
+  }
+  return { status: 'success', transactions: transactions };
+}
