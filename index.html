@@ -41,9 +41,31 @@
         <main class="flex-1 p-4 pb-24 overflow-y-auto">
             
             <!-- Error Alert -->
-            <div v-if="error" class="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-4 relative" role="alert">
-                <span class="block sm:inline">{{ error }}</span>
+            <div v-if="error" class="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-4 relative break-all" role="alert">
+                <strong class="font-bold block mb-1">發生錯誤：</strong>
+                <span class="block sm:inline text-sm">{{ error }}</span>
+                
+                <!-- Debug Suggestion -->
+                <div v-if="error.includes('Load failed') || error.includes('Fetch')" class="mt-2 text-xs text-red-800 bg-red-200 p-2 rounded">
+                    <p class="font-bold">💡 顧問診斷：</p>
+                    <p>這通常代表 GAS 部署權限設定錯誤。</p>
+                    <ol class="list-decimal ml-4 mt-1">
+                        <li>請確認 GAS 部署權限為「所有人 (Anyone)」。</li>
+                        <li>請確認 GAS_API_URL 網址正確。</li>
+                    </ol>
+                </div>
+
                 <span @click="error = null" class="absolute top-0 bottom-0 right-0 px-4 py-3 cursor-pointer font-bold">×</span>
+            </div>
+
+            <!-- Setup Check Alert -->
+            <div v-if="setupError" class="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 mb-4">
+                <p class="font-bold">⚠️ 設定尚未完成</p>
+                <p class="text-sm mt-1">請打開 index.html 修改以下變數：</p>
+                <ul class="list-disc ml-5 text-sm mt-1">
+                    <li v-if="setupError.includes('LIFF')">LIFF_ID 尚未填寫</li>
+                    <li v-if="setupError.includes('GAS')">GAS_API_URL 尚未填寫</li>
+                </ul>
             </div>
 
             <!-- VIEW 1: PROJECT LIST (Entrance) -->
@@ -55,7 +77,7 @@
                     </button>
                 </div>
 
-                <div v-if="projects.length === 0" class="text-center py-12 text-gray-400 border-2 border-dashed border-gray-200 rounded-lg">
+                <div v-if="projects.length === 0 && !loading" class="text-center py-12 text-gray-400 border-2 border-dashed border-gray-200 rounded-lg">
                     <p>目前沒有進行中的分帳活動</p>
                     <p class="text-xs mt-2">點擊右上方按鈕建立第一個活動</p>
                 </div>
@@ -207,6 +229,7 @@
 const { createApp, ref, computed, onMounted } = Vue;
 
 // --- CONFIGURATION ---
+// ⚠️ 已根據您的要求填入，請直接部署 ⚠️
 const LIFF_ID = "2009031450-O3r9jaRJ"; 
 const GAS_API_URL = "https://script.google.com/macros/s/AKfycby-ErOoXEiRdFjgygzhCRZnYg7q1yZYWW_VSHOlaWZf__EqT0NVIXBMZMQJR5E1b0kH/exec"; 
 
@@ -215,18 +238,19 @@ createApp({
         const loading = ref(true);
         const loadingText = ref('初始化中...');
         const error = ref(null);
+        const setupError = ref(null);
         
         // Views: projectList, createProject, expenseList, addExpense, settle
         const currentView = ref('projectList'); 
         
-        const user = ref(null); // Current User Profile
-        const context = ref(null); // LIFF Context (groupId)
+        const user = ref(null); 
+        const context = ref(null); 
         
         // Data
         const projects = ref([]);
         const currentProject = ref(null);
         const expenses = ref([]);
-        const users = ref({}); // Map: userId -> {displayName, pictureUrl}
+        const users = ref({});
         const settlement = ref([]);
 
         // Forms
@@ -259,43 +283,87 @@ createApp({
         const getUserName = (id) => users.value[id]?.displayName || '未知';
 
         const callApi = async (action, payload) => {
+            if (GAS_API_URL.includes("YOUR_GAS_WEB_APP_URL")) {
+                throw new Error("請先在 index.html 設定正確的 GAS_API_URL");
+            }
             try {
+                // 使用 text/plain 繞過 CORS Preflight
                 const response = await fetch(GAS_API_URL, {
                     method: 'POST',
                     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                     body: JSON.stringify({ action, payload })
                 });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP Error: ${response.status}`);
+                }
+
                 const data = await response.json();
                 if (data.status === 'error') throw new Error(data.message);
                 return data;
             } catch (err) {
-                console.error(err);
-                error.value = err.message;
+                console.error("API Call Failed:", err);
+                // 優化錯誤顯示
+                let msg = err.message;
+                if (msg === 'Failed to fetch' || msg === 'Load failed') {
+                    msg = `連線被拒絕 (${msg})。請檢查 GAS 部署權限是否為「所有人 (Anyone)」。`;
+                }
+                error.value = msg;
                 throw err;
             }
         };
 
         // --- FLOWS ---
 
+        const checkConfig = () => {
+            let errs = [];
+            if (LIFF_ID.includes("YOUR_LIFF_ID")) errs.push("LIFF");
+            if (GAS_API_URL.includes("YOUR_GAS_WEB_APP_URL")) errs.push("GAS");
+            
+            if (errs.length > 0) {
+                setupError.value = errs;
+                loading.value = false;
+                return false;
+            }
+            return true;
+        };
+
         const initLiff = async () => {
+            if (!checkConfig()) return;
+
             try {
                 await liff.init({ liffId: LIFF_ID });
                 if (!liff.isLoggedIn()) {
                     liff.login();
                     return;
                 }
-                user.value = await liff.getProfile();
-                context.value = liff.getContext();
+                
+                // 取得 Profile
+                try {
+                    user.value = await liff.getProfile();
+                    context.value = liff.getContext();
+                } catch (e) {
+                    throw new Error("無法取得使用者資料，請確認 LIFF 已開啟 Profile 權限。");
+                }
 
                 const groupId = context.value?.groupId || context.value?.roomId;
                 if (!groupId) {
-                    error.value = "請在 LINE 群組中開啟此頁面。";
+                    // 開發模式或非群組開啟
+                    // error.value = "請在 LINE 群組中開啟此頁面 (無法取得 Group ID)。";
+                    // loading.value = false;
+                    // return;
+                    
+                    // FOR DEBUG ONLY: 如果不在群組，允許操作但給個提示，或者給個假 ID
+                    // 為了讓你測試成功，我們先給個警告但允許繼續，如果後端支援無 Group ID 列表查詢
+                    // 但我們的後端 getProjects 需要 groupId。
+                    // 這裡顯示比較友善的錯誤
+                    error.value = "警告：無法取得群組 ID。請確認你是從群組對話的 LIFF 連結進入，而非直接點擊網址。";
                     loading.value = false;
                     return;
                 }
 
-                // 1. Sync User info to backend
-                callApi('syncUser', {
+                // 1. Sync User info
+                await callApi('syncUser', {
                     userId: user.value.userId,
                     displayName: user.value.displayName,
                     pictureUrl: user.value.pictureUrl,
@@ -306,7 +374,7 @@ createApp({
                 await fetchProjects(groupId);
 
             } catch (err) {
-                error.value = "初始化失敗: " + err.message;
+                error.value = "系統初始化失敗: " + err.message;
             } finally {
                 loading.value = false;
             }
@@ -328,14 +396,16 @@ createApp({
             if (!newProjectName.value) return;
             loading.value = true;
             try {
-                const groupId = context.value.groupId || context.value.roomId;
+                const groupId = context.value?.groupId || context.value?.roomId;
+                if (!groupId) throw new Error("無群組 ID，無法建立。");
+
                 await callApi('createProject', {
                     name: newProjectName.value,
                     ownerId: user.value.userId,
                     boundGroupId: groupId
                 });
                 newProjectName.value = '';
-                await fetchProjects(groupId); // Refresh list
+                await fetchProjects(groupId); 
             } finally {
                 loading.value = false;
             }
@@ -348,12 +418,9 @@ createApp({
             try {
                 const res = await callApi('getProjectDetails', { projectId: project.id });
                 expenses.value = res.expenses;
-                users.value = res.users; // Ensure we have user map
+                users.value = res.users; 
                 
-                // Initialize form defaults
                 form.value.payerId = user.value.userId;
-                // Default split members: everyone found in the user map? 
-                // Better strategy: everyone in user map is a candidate.
                 form.value.splitMembers = Object.keys(users.value);
 
                 currentView.value = 'expenseList';
@@ -398,7 +465,6 @@ createApp({
                     splitMembers: form.value.splitMembers
                 });
                 
-                // Refresh expenses
                 const res = await callApi('getProjectDetails', { projectId: currentProject.value.id });
                 expenses.value = res.expenses;
                 
@@ -426,7 +492,7 @@ createApp({
         });
 
         return {
-            loading, loadingText, error, currentView, user, 
+            loading, loadingText, error, setupError, currentView, user, 
             projects, currentProject, expenses, users, settlement,
             newProjectName, form, headerTitle, totalExpense,
             formatDate, getUserName, goBack, submitCreateProject, 
